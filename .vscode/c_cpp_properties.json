@@ -1,0 +1,17 @@
+{
+    "configurations": [
+        {
+            "name": "MinGW",
+            "includePath": [
+                "${workspaceFolder}",
+                "C:/Coding/msys64/mingw64/include/SDL2"
+            ],
+            "defines": [],
+            "compilerPath": "C:/Coding/msys64/mingw64/bin/gcc.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}

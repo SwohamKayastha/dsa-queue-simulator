@@ -15,6 +15,8 @@ process the queue and visualize them*/
 #include <unistd.h> 
 #include <stdio.h> 
 #include <string.h>
+#include <stdlib.h>
+#include <time.h>
 
 #define MAX_LINE_LENGTH 20
 #define MAIN_FONT "/usr/share/fonts/TTF/DejaVuSans.ttf"
@@ -24,6 +26,8 @@ process the queue and visualize them*/
 #define ROAD_WIDTH 150
 #define LANE_WIDTH 50
 #define ARROW_SIZE 15
+#define MAX_QUEUE_SIZE 100
+#define MAX_VEHICLE_ID 20
 
 
 const char* VEHICLE_FILE = "vehicles.data";
@@ -33,6 +37,88 @@ typedef struct{
     int nextLight;
 } SharedData;
 
+// adding queue structures
+// Vehicle structure
+typedef struct {
+    char id[MAX_VEHICLE_ID];
+    char lane;              // A/B/C/D
+    int arrivalTime;
+    bool isEmergency;
+    int lane_number;        // 1 for left, 2 for middle, 3 for right
+} Vehicle;
+
+// Queue structure
+typedef struct {
+    Vehicle* vehicles[MAX_QUEUE_SIZE];
+    int front;
+    int rear;
+    int size;
+    pthread_mutex_t lock;
+} VehicleQueue;
+
+// global queue variables
+VehicleQueue* queueA;
+VehicleQueue* queueB;
+VehicleQueue* queueC;
+VehicleQueue* queueD;
+
+// queue operations:
+VehicleQueue* createQueue() {
+    VehicleQueue* queue = (VehicleQueue*)malloc(sizeof(VehicleQueue));
+    queue->front = 0;
+    queue->rear = -1;
+    queue->size = 0;
+    pthread_mutex_init(&queue->lock, NULL);
+    return queue;
+}
+
+bool isQueueFull(VehicleQueue* queue) {
+    return queue->size >= MAX_QUEUE_SIZE;
+}
+
+bool isQueueEmpty(VehicleQueue* queue) {
+    return queue->size == 0;
+}
+
+void enqueue(VehicleQueue* queue, Vehicle* vehicle) {
+    pthread_mutex_lock(&queue->lock);
+    if (!isQueueFull(queue)) {
+        queue->rear = (queue->rear + 1) % MAX_QUEUE_SIZE;
+        queue->vehicles[queue->rear] = vehicle;
+        queue->size++;
+        printf("Enqueued vehicle %s to lane %c (size: %d)\n", 
+               vehicle->id, vehicle->lane, queue->size);
+    } else {
+        printf("Queue for lane %c is full!\n", vehicle->lane);
+    }
+    pthread_mutex_unlock(&queue->lock);
+}
+
+Vehicle* dequeue(VehicleQueue* queue) {
+    pthread_mutex_lock(&queue->lock);
+    Vehicle* vehicle = NULL;
+    if (!isQueueEmpty(queue)) {
+        vehicle = queue->vehicles[queue->front];
+        queue->front = (queue->front + 1) % MAX_QUEUE_SIZE;
+        queue->size--;
+        printf("Dequeued vehicle %s from lane %c (size: %d)\n", 
+               vehicle->id, vehicle->lane, queue->size);
+    }
+    pthread_mutex_unlock(&queue->lock);
+    return vehicle;
+}
+
+// queu cleanup
+void cleanupQueue(VehicleQueue* queue) {
+    pthread_mutex_lock(&queue->lock);
+    for (int i = 0; i < queue->size; i++) {
+        int idx = (queue->front + i) % MAX_QUEUE_SIZE;
+        free(queue->vehicles[idx]);
+    }
+    pthread_mutex_unlock(&queue->lock);
+    pthread_mutex_destroy(&queue->lock);
+    free(queue);
+}
 
 // Function declarations
 bool initializeSDL(SDL_Window **window, SDL_Renderer **renderer);
@@ -72,6 +158,12 @@ int main(int argc, char* argv[]) {
     drawLightForB(renderer, false);
     SDL_RenderPresent(renderer);
 
+    // Initialize queues before creating threads
+    queueA = createQueue();
+    queueB = createQueue();
+    queueC = createQueue();
+    queueD = createQueue();
+
     // we need to create seprate long running thread for the queue processing and light
     // pthread_create(&tLight, NULL, refreshLight, &sharedData);
     pthread_create(&tQueue, NULL, chequeQueue, &sharedData);
@@ -89,6 +181,11 @@ int main(int argc, char* argv[]) {
     SDL_DestroyMutex(mutex);
     if (renderer) SDL_DestroyRenderer(renderer);
     if (window) SDL_DestroyWindow(window);
+    // Add cleanup before SDL_Quit
+    cleanupQueue(queueA);
+    cleanupQueue(queueB);
+    cleanupQueue(queueC);
+    cleanupQueue(queueD);
     // pthread_kil
     SDL_Quit();
     return 0;
@@ -227,7 +324,7 @@ void drawLightForC(SDL_Renderer* renderer, bool isRed) {
 void drawLightForD(SDL_Renderer* renderer, bool isRed) {
     // draw light box
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_Rect lightBox = {288, 325, 30, 80};  // taller box to accommodate both lights
+    SDL_Rect lightBox = {288, 325, 30, 90};  // taller box to accommodate both lights
     SDL_RenderFillRect(renderer, &lightBox);
     
     // Left turn light - always green (L3)
@@ -371,13 +468,34 @@ void* readAndParseFile(void* arg) {
         while (fgets(line, sizeof(line), file)) {
             // Remove newline if present
             line[strcspn(line, "\n")] = 0;
-
+            
             // Split using ':'
             char* vehicleNumber = strtok(line, ":");
-            char* road = strtok(NULL, ":"); // read next item resulted from split
+            char* road = strtok(NULL, ":");
 
-            if (vehicleNumber && road)  printf("Vehicle: %s, Raod: %s\n", vehicleNumber, road);
-            else printf("Invalid format: %s\n", line);
+            if (vehicleNumber && road) {
+                Vehicle* newVehicle = (Vehicle*)malloc(sizeof(Vehicle));
+                strncpy(newVehicle->id, vehicleNumber, MAX_VEHICLE_ID - 1);
+                newVehicle->id[MAX_VEHICLE_ID - 1] = '\0';
+                newVehicle->lane = road[0];
+                newVehicle->arrivalTime = time(NULL);
+                newVehicle->isEmergency = (strstr(vehicleNumber, "EMG") != NULL);
+                
+                // lane number based on vehicle ID format
+                if (strstr(vehicleNumber, "L1")) newVehicle->lane_number = 1;
+                else if (strstr(vehicleNumber, "L2")) newVehicle->lane_number = 2;
+                else if (strstr(vehicleNumber, "L3")) newVehicle->lane_number = 3;
+                else newVehicle->lane_number = 2; // default to middle lane
+
+                // eneque the vehicle to the respective lane
+                switch(newVehicle->lane) {
+                    case 'A': enqueue(queueA, newVehicle); break;
+                    case 'B': enqueue(queueB, newVehicle); break;
+                    case 'C': enqueue(queueC, newVehicle); break;
+                    case 'D': enqueue(queueD, newVehicle); break;
+                    default: free(newVehicle);
+                }
+            }
         }
         fclose(file);
         sleep(2); // manage this time

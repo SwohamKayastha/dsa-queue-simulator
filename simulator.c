@@ -39,6 +39,9 @@ bool initializeSDL(SDL_Window **window, SDL_Renderer **renderer);
 void drawRoadsAndLane(SDL_Renderer *renderer, TTF_Font *font);
 void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int y);
 void drawLightForB(SDL_Renderer* renderer, bool isRed);
+void drawLightForA(SDL_Renderer* renderer, bool isRed);
+void drawLightForC(SDL_Renderer* renderer, bool isRed);
+void drawLightForD(SDL_Renderer* renderer, bool isRed);
 void refreshLight(SDL_Renderer *renderer, SharedData* sharedData);
 void* chequeQueue(void* arg);
 void* readAndParseFile(void* arg);
@@ -66,7 +69,7 @@ int main(int argc, char* argv[]) {
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
     drawRoadsAndLane(renderer, font);
-    // drawLightForB(renderer, false);
+    drawLightForB(renderer, false);
     SDL_RenderPresent(renderer);
 
     // we need to create seprate long running thread for the queue processing and light
@@ -167,17 +170,56 @@ void drawArrwow(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, int x3, 
 }
 
 
-void drawLightForB(SDL_Renderer* renderer, bool isRed){
+void drawLightForB(SDL_Renderer* renderer, bool isRed) {
     // draw light box
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_Rect lightBox = {400, 300, 50, 30};
+    SDL_Rect lightBox = {388, 488, 70, 30};
     SDL_RenderFillRect(renderer, &lightBox);
     // draw light
     if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
     else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
-    SDL_Rect straight_Light = {405, 305, 20, 20};
+    SDL_Rect straight_Light = {393, 493, 20, 20};
     SDL_RenderFillRect(renderer, &straight_Light);
-    drawArrwow(renderer, 435,305, 435, 305+20, 435+10, 305+10);
+    drawArrwow(renderer, 435-10, 505-10, 435-10, 505+20-10, 435+10-10, 505+10-10);
+}
+
+void drawLightForA(SDL_Renderer* renderer, bool isRed) {
+    // draw light box
+    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+    SDL_Rect lightBox = {388, 288, 70, 30};
+    SDL_RenderFillRect(renderer, &lightBox);
+    // draw light
+    if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
+    else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    SDL_Rect straight_Light = {393, 293, 20, 20};
+    SDL_RenderFillRect(renderer, &straight_Light);
+    drawArrwow(renderer, 435-10, 305-10, 435-10, 305+20-10, 435+10-10, 305+10-10);
+}
+
+void drawLightForC(SDL_Renderer* renderer, bool isRed) {
+    // draw light box
+    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+    SDL_Rect lightBox = {488, 388, 30, 70};
+    SDL_RenderFillRect(renderer, &lightBox);
+    // draw light
+    if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
+    else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    SDL_Rect straight_Light = {493, 393, 20, 20};
+    SDL_RenderFillRect(renderer, &straight_Light);
+    drawArrwow(renderer, 505-10, 435-10, 505+20-10, 435-10, 505+10-10, 435+10-10);
+}
+
+void drawLightForD(SDL_Renderer* renderer, bool isRed) {
+    // draw light box
+    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+    SDL_Rect lightBox = {288, 388, 30, 70};
+    SDL_RenderFillRect(renderer, &lightBox);
+    // draw light
+    if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
+    else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    SDL_Rect straight_Light = {293, 393, 20, 20};
+    SDL_RenderFillRect(renderer, &straight_Light);
+    drawArrwow(renderer, 305-10, 435-10, 305+20-10, 435-10, 305+10-10, 435+10-10);
 }
 
 
@@ -237,35 +279,66 @@ void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int 
 }
 
 
-void refreshLight(SDL_Renderer *renderer, SharedData* sharedData){
+void refreshLight(SDL_Renderer *renderer, SharedData* sharedData) {
     if(sharedData->nextLight == sharedData->currentLight) return; // early return
 
-    if(sharedData->nextLight == 0){ // trun off all lights
-        drawLightForB(renderer, false);
+    // All lights red
+    if(sharedData->nextLight == 0) {
+        drawLightForA(renderer, true);
+        drawLightForB(renderer, true);
+        drawLightForC(renderer, true);
+        drawLightForD(renderer, true);
     }
-    if(sharedData->nextLight == 2) drawLightForB(renderer, true);
-    else drawLightForB(renderer, false);
+    // Lane A green
+    else if(sharedData->nextLight == 1) {
+        drawLightForA(renderer, false);
+        drawLightForB(renderer, true);
+        drawLightForC(renderer, true);
+        drawLightForD(renderer, true);
+    }
+    // Lane B green
+    else if(sharedData->nextLight == 2) {
+        drawLightForA(renderer, true);
+        drawLightForB(renderer, false);
+        drawLightForC(renderer, true);
+        drawLightForD(renderer, true);
+    }
+    // Lane C green
+    else if(sharedData->nextLight == 3) {
+        drawLightForA(renderer, true);
+        drawLightForB(renderer, true);
+        drawLightForC(renderer, false);
+        drawLightForD(renderer, true);
+    }
+    // Lane D green
+    else if(sharedData->nextLight == 4) {
+        drawLightForA(renderer, true);
+        drawLightForB(renderer, true);
+        drawLightForC(renderer, true);
+        drawLightForD(renderer, false);
+    }
+
     SDL_RenderPresent(renderer);
-    printf("Light of queue updated from %d to %d\n", sharedData->currentLight,  sharedData->nextLight);
-    // update the light
+    printf("Light of queue updated from %d to %d\n", sharedData->currentLight, sharedData->nextLight);
     sharedData->currentLight = sharedData->nextLight;
     fflush(stdout);
 }
 
-
-void* chequeQueue(void* arg){
+void* chequeQueue(void* arg) {
     SharedData* sharedData = (SharedData*)arg;
-    // int i = 1;
     while (1) {
+        // All red
         sharedData->nextLight = 0;
-        sleep(5);
-        sharedData->nextLight = 2;
-        sleep(5);
+        sleep(2);
+        // Cycle through each lane
+        for(int lane = 1; lane <= 4; lane++) {
+            sharedData->nextLight = lane;
+            sleep(5);
+        }
     }
 }
 
-//working
-// you may need to pass the queue on this function for sharing the data
+
 void* readAndParseFile(void* arg) {
     while(1){ 
         FILE* file = fopen(VEHICLE_FILE, "r");

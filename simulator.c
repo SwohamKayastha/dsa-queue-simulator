@@ -173,14 +173,19 @@ void drawArrwow(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, int x3, 
 void drawLightForB(SDL_Renderer* renderer, bool isRed) {
     // draw light box
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_Rect lightBox = {388, 488, 70, 30};
+    SDL_Rect lightBox = {325, 488, 80, 30};  // wider box to accommodate both lights
     SDL_RenderFillRect(renderer, &lightBox);
-    // draw light
+    
+    // Left lane light - always green (L1)
+    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    SDL_Rect left_Light = {330, 493, 20, 20};  // leftmost lane position
+    SDL_RenderFillRect(renderer, &left_Light);
+    
+    // Middle lane light - controlled by traffic signal (L2)
     if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
     else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
-    SDL_Rect straight_Light = {393, 493, 20, 20};
-    SDL_RenderFillRect(renderer, &straight_Light);
-    drawArrwow(renderer, 435-10, 505-10, 435-10, 505+20-10, 435+10-10, 505+10-10);
+    SDL_Rect middle_Light = {380, 493, 20, 20};  // middle lane position
+    SDL_RenderFillRect(renderer, &middle_Light);
 }
 
 void drawLightForA(SDL_Renderer* renderer, bool isRed) {
@@ -188,12 +193,17 @@ void drawLightForA(SDL_Renderer* renderer, bool isRed) {
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
     SDL_Rect lightBox = {388, 288, 70, 30};
     SDL_RenderFillRect(renderer, &lightBox);
-    // draw light
+    
+    // Right turn light - always green
+    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    SDL_Rect right_Light = {433, 293, 20, 20};
+    SDL_RenderFillRect(renderer, &right_Light);
+    
+    // Straight light - controlled by traffic signal
     if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
     else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
     SDL_Rect straight_Light = {393, 293, 20, 20};
     SDL_RenderFillRect(renderer, &straight_Light);
-    drawArrwow(renderer, 435-10, 305-10, 435-10, 305+20-10, 435+10-10, 305+10-10);
 }
 
 void drawLightForC(SDL_Renderer* renderer, bool isRed) {
@@ -201,25 +211,35 @@ void drawLightForC(SDL_Renderer* renderer, bool isRed) {
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
     SDL_Rect lightBox = {488, 388, 30, 70};
     SDL_RenderFillRect(renderer, &lightBox);
-    // draw light
+    
+    // Right turn light - always green
+    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    SDL_Rect right_Light = {493, 433, 20, 20};
+    SDL_RenderFillRect(renderer, &right_Light);
+    
+    // Straight light - controlled by traffic signal
     if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
     else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
     SDL_Rect straight_Light = {493, 393, 20, 20};
     SDL_RenderFillRect(renderer, &straight_Light);
-    drawArrwow(renderer, 505-10, 435-10, 505+20-10, 435-10, 505+10-10, 435+10-10);
 }
 
 void drawLightForD(SDL_Renderer* renderer, bool isRed) {
     // draw light box
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_Rect lightBox = {288, 388, 30, 70};
+    SDL_Rect lightBox = {288, 325, 30, 80};  // taller box to accommodate both lights
     SDL_RenderFillRect(renderer, &lightBox);
-    // draw light
+    
+    // Left turn light - always green (L3)
+    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    SDL_Rect left_turn_Light = {293, 330, 20, 20};  // top position
+    SDL_RenderFillRect(renderer, &left_turn_Light);
+    
+    // Middle lane light - controlled by traffic signal (L2)
     if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
     else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
-    SDL_Rect straight_Light = {293, 393, 20, 20};
-    SDL_RenderFillRect(renderer, &straight_Light);
-    drawArrwow(renderer, 305-10, 435-10, 305+20-10, 435-10, 305+10-10, 435+10-10);
+    SDL_Rect middle_Light = {293, 380, 20, 20};  // middle lane position
+    SDL_RenderFillRect(renderer, &middle_Light);
 }
 
 

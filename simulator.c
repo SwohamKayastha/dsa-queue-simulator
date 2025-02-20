@@ -22,7 +22,7 @@ process the queue and visualize them*/
 #define MAIN_FONT "/usr/share/fonts/TTF/DejaVuSans.ttf"
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 800
-#define SCALE 1
+#define SCALE 1.1
 #define ROAD_WIDTH 150
 #define LANE_WIDTH 50
 #define ARROW_SIZE 15
@@ -131,6 +131,9 @@ void drawLightForD(SDL_Renderer* renderer, bool isRed);
 void refreshLight(SDL_Renderer *renderer, SharedData* sharedData);
 void* chequeQueue(void* arg);
 void* readAndParseFile(void* arg);
+void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos);
+void drawVehiclesFromQueue(SDL_Renderer *renderer, TTF_Font *font, VehicleQueue *queue);
+void drawVehicles(SDL_Renderer *renderer, TTF_Font *font);
 
 
 void printMessageHelper(const char* message, int count) {
@@ -175,6 +178,7 @@ int main(int argc, char* argv[]) {
     while (running) {
         // update light
         refreshLight(renderer, &sharedData);
+        drawVehicles(renderer, font);
         while (SDL_PollEvent(&event))
             if (event.type == SDL_QUIT) running = false;
     }
@@ -585,4 +589,66 @@ void* readAndParseFile(void* arg) {
         fclose(file);
         sleep(2); // manage this time
     }
+}
+
+// drwaing a single vehicle as a colored rectangle and optionally display its ID.
+void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos) {
+    int w = 20, h = 10;
+    int x = 0, y = 0;
+    // positioning vehicles
+    switch(v->lane) {
+        case 'A': 
+            // Road A (north)
+            x = WINDOW_WIDTH/2 + 10;
+            y = 10 + pos * (h + 5);
+            break;
+        case 'B': 
+            // Road B (south)
+            x = WINDOW_WIDTH/2 + 10;
+            y = WINDOW_HEIGHT - (pos * (h + 5) + 10 + h);
+            break;
+        case 'C': 
+            // Road C (east)
+            x = WINDOW_WIDTH - (pos * (w + 5) + 10 + w);
+            y = WINDOW_HEIGHT/2 + 10;
+            break;
+        case 'D': 
+            // Road D (west)
+            x = 10 + pos * (w + 5);
+            y = WINDOW_HEIGHT/2 + 10;
+            break;
+        default:
+            break;
+    }
+    // using red for emergency vehicles, otherwise blue.
+    if(v->isEmergency)
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+    else
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
+    SDL_Rect rect = { x, y, w, h };
+    SDL_RenderFillRect(renderer, &rect);
+    
+    // drawing the vehicle ID above the rectangle.
+    char idLabel[MAX_VEHICLE_ID];
+    strncpy(idLabel, v->id, MAX_VEHICLE_ID);
+    idLabel[MAX_VEHICLE_ID-1] = '\0';
+    displayText(renderer, font, idLabel, x, y - h - 2);
+}
+
+// drawing vehicles from a given queue.
+void drawVehiclesFromQueue(SDL_Renderer *renderer, TTF_Font *font, VehicleQueue *queue) {
+    pthread_mutex_lock(&queue->lock);
+    for (int i = 0; i < queue->size; i++) {
+        int idx = (queue->front + i) % MAX_QUEUE_SIZE;
+        drawVehicle(renderer, font, queue->vehicles[idx], i);
+    }
+    pthread_mutex_unlock(&queue->lock);
+}
+
+// drawing vehicles from all queues.
+void drawVehicles(SDL_Renderer *renderer, TTF_Font *font) {
+    drawVehiclesFromQueue(renderer, font, queueA);
+    drawVehiclesFromQueue(renderer, font, queueB);
+    drawVehiclesFromQueue(renderer, font, queueC);
+    drawVehiclesFromQueue(renderer, font, queueD);
 }

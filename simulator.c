@@ -108,7 +108,7 @@ Vehicle* dequeue(VehicleQueue* queue) {
     return vehicle;
 }
 
-// queu cleanup
+// queue cleanup
 void cleanupQueue(VehicleQueue* queue) {
     pthread_mutex_lock(&queue->lock);
     for (int i = 0; i < queue->size; i++) {
@@ -267,118 +267,203 @@ void drawArrwow(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, int x3, 
 }
 
 
-void drawLightForB(SDL_Renderer* renderer, bool isRed) {
-    // draw light box
-    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_Rect lightBox = {325, 488, 80, 30};  // wider box to accommodate both lights
-    SDL_RenderFillRect(renderer, &lightBox);
+void drawRoadsAndLane(SDL_Renderer *renderer, TTF_Font *font) {
+    // Draw intersection roads (dark gray)
+    SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
+    SDL_Rect vRoad = {WINDOW_WIDTH/2 - ROAD_WIDTH/2, 0, ROAD_WIDTH, WINDOW_HEIGHT};
+    SDL_RenderFillRect(renderer, &vRoad);
+    SDL_Rect hRoad = {0, WINDOW_HEIGHT/2 - ROAD_WIDTH/2, WINDOW_WIDTH, ROAD_WIDTH};
+    SDL_RenderFillRect(renderer, &hRoad);
+
+    // dashed lane markings inside the intersection
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    int dashLength = 15, gapLength = 10;
+    for (int i = 0; i <= 3; i++) {
+        int x = WINDOW_WIDTH/2 - ROAD_WIDTH/2 + i * LANE_WIDTH;
+        for (int y = WINDOW_HEIGHT/2 - ROAD_WIDTH/2; y < WINDOW_HEIGHT/2 + ROAD_WIDTH/2; y += dashLength + gapLength)
+            SDL_RenderDrawLine(renderer, x, y, x, y + dashLength);
+    }
+    for (int i = 0; i <= 3; i++) {
+        int y = WINDOW_HEIGHT/2 - ROAD_WIDTH/2 + i * LANE_WIDTH;
+        for (int x = WINDOW_WIDTH/2 - ROAD_WIDTH/2; x < WINDOW_WIDTH/2 + ROAD_WIDTH/2; x += dashLength + gapLength)
+            SDL_RenderDrawLine(renderer, x, y, x + dashLength, y);
+    }
+
+    // extended roads arms
+
+    // road A (north): extended area from y = 0 to top of intersection.
+    int roadA_x = WINDOW_WIDTH/2 - ROAD_WIDTH/2;
+    int roadA_yStart = 0, roadA_yEnd = WINDOW_HEIGHT/2 - ROAD_WIDTH/2;
+    int laneWidthAB = ROAD_WIDTH / 3;
+    // draw vertical dividing lines inside road A.
+    for (int i = 1; i < 3; i++) {
+         int x = roadA_x + i * laneWidthAB;
+         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+         SDL_RenderDrawLine(renderer, x, roadA_yStart, x, roadA_yEnd);
+    }
+    // road B (south): extended area from bottom of intersection to window bottom.
+    int roadB_x = WINDOW_WIDTH/2 - ROAD_WIDTH/2;
+    int roadB_yStart = WINDOW_HEIGHT/2 + ROAD_WIDTH/2, roadB_yEnd = WINDOW_HEIGHT;
+    for (int i = 1; i < 3; i++) {
+         int x = roadB_x + i * laneWidthAB;
+         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+         SDL_RenderDrawLine(renderer, x, roadB_yStart, x, roadB_yEnd);
+    }
+
+    // road C (east): extended area from x = WINDOW_WIDTH/2 + ROAD_WIDTH/2 to WINDOW_WIDTH.
+    int roadC_y = WINDOW_HEIGHT/2 - ROAD_WIDTH/2;
+    int roadC_xStart = WINDOW_WIDTH/2 + ROAD_WIDTH/2, roadC_xEnd = WINDOW_WIDTH;
+    int laneHeightCD = ROAD_WIDTH / 3;
+    // Draw horizontal dividing lines for road C.
+    for (int i = 1; i < 3; i++) {
+         int y = roadC_y + i * laneHeightCD;
+         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+         SDL_RenderDrawLine(renderer, roadC_xStart, y, roadC_xEnd, y);
+    }
+    // road D (west): extended area from x = 0 to WINDOW_WIDTH/2 - ROAD_WIDTH/2.
+    int roadD_y = WINDOW_HEIGHT/2 - ROAD_WIDTH/2;
+    int roadD_xStart = 0, roadD_xEnd = WINDOW_WIDTH/2 - ROAD_WIDTH/2;
+    for (int i = 1; i < 3; i++) {
+         int y = roadD_y + i * laneHeightCD;
+         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+         SDL_RenderDrawLine(renderer, roadD_xStart, y, roadD_xEnd, y);
+    }
     
-    // Left lane light - always green (L1)
-    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
-    SDL_Rect left_Light = {330, 493, 20, 20};  // leftmost lane position
-    SDL_RenderFillRect(renderer, &left_Light);
+    // Road A labels:
+    int roadA_centerX = WINDOW_WIDTH/2;
+    int laneHeightA = roadA_yEnd - roadA_yStart;
+    for (int i = 0; i < 3; i++) {
+         char label[4];
+         sprintf(label, "A%d", i+1);
+         int labelY = roadA_yStart + (i * laneHeightA + laneHeightA/2);
+         displayText(renderer, font, label, roadA_centerX, labelY);
+    }
+    // Road B labels:
+    int roadB_centerX = WINDOW_WIDTH/2;
+    int laneHeightB = roadB_yEnd - roadB_yStart;
+    for (int i = 0; i < 3; i++) {
+         char label[4];
+         sprintf(label, "B%d", i+1);
+         int labelY = roadB_yStart + (i * laneHeightB + laneHeightB/2);
+         displayText(renderer, font, label, roadB_centerX, labelY);
+    }
+    // Road C labels (east)
+    int roadC_centerY = WINDOW_HEIGHT/2;
+    int laneWidthC = ROAD_WIDTH / 3;
+    int roadC_centerX = roadC_xStart + laneWidthC/2;
+    for (int i = 0; i < 3; i++) {
+         char label[4];
+         sprintf(label, "C%d", i+1);
+         int labelX = roadC_xStart + (i * laneWidthC + laneWidthC/2);
+         displayText(renderer, font, label, labelX, roadC_centerY);
+    }
+    // Road D labels (west)
+    int roadD_centerY = WINDOW_HEIGHT/2;
+    int laneWidthD = ROAD_WIDTH / 3;
+    int roadD_centerX = roadD_xEnd - laneWidthD/2;
+    for (int i = 0; i < 3; i++) {
+         char label[4];
+         sprintf(label, "D%d", i+1);
+         int labelX = roadD_xStart + (i * laneWidthD + laneWidthD/2);
+         displayText(renderer, font, label, labelX, roadD_centerY);
+    }
     
-    // Middle lane light - controlled by traffic signal (L2)
-    if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
-    else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
-    SDL_Rect middle_Light = {380, 493, 20, 20};  // middle lane position
-    SDL_RenderFillRect(renderer, &middle_Light);
+    // Intersection direction labels (for clarity)
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    displayText(renderer, font, "A", WINDOW_WIDTH/2, 10);
+    displayText(renderer, font, "B", WINDOW_WIDTH/2, WINDOW_HEIGHT - 30);
+    displayText(renderer, font, "D", 10, WINDOW_HEIGHT/2);
+    displayText(renderer, font, "C", WINDOW_WIDTH - 30, WINDOW_HEIGHT/2);
 }
 
 void drawLightForA(SDL_Renderer* renderer, bool isRed) {
-    // draw light box
-    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
     SDL_Rect lightBox = {388, 288, 70, 30};
-    SDL_RenderFillRect(renderer, &lightBox);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderDrawRect(renderer, &lightBox);
+
+    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+    SDL_Rect innerBox = {389, 289, 68, 28};
+    SDL_RenderFillRect(renderer, &innerBox);
     
     // Right turn light - always green
-    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);
     SDL_Rect right_Light = {433, 293, 20, 20};
     SDL_RenderFillRect(renderer, &right_Light);
     
     // Straight light - controlled by traffic signal
-    if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
-    else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    if(isRed) 
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+    else 
+        SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);
     SDL_Rect straight_Light = {393, 293, 20, 20};
     SDL_RenderFillRect(renderer, &straight_Light);
 }
 
-void drawLightForC(SDL_Renderer* renderer, bool isRed) {
-    // draw light box
+void drawLightForB(SDL_Renderer* renderer, bool isRed) {
+    SDL_Rect lightBox = {325, 488, 80, 30};
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderDrawRect(renderer, &lightBox);
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_Rect lightBox = {488, 388, 30, 70};
-    SDL_RenderFillRect(renderer, &lightBox);
+    SDL_Rect innerBox = {326, 489, 78, 28};
+    SDL_RenderFillRect(renderer, &innerBox);
     
-    // Right turn light - always green
-    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    // left lane light -> always green
+    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);
+    SDL_Rect left_Light = {330, 493, 20, 20};
+    SDL_RenderFillRect(renderer, &left_Light);
+    
+    // middle lane light -> controlled by traffic signal
+    if(isRed) 
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+    else 
+        SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);
+    SDL_Rect middle_Light = {380, 493, 20, 20};
+    SDL_RenderFillRect(renderer, &middle_Light);
+}
+
+void drawLightForC(SDL_Renderer* renderer, bool isRed) {
+    SDL_Rect lightBox = {488, 388, 30, 70};
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderDrawRect(renderer, &lightBox);
+    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+    SDL_Rect innerBox = {489, 389, 28, 68};
+    SDL_RenderFillRect(renderer, &innerBox);
+    
+    // right turn light - always green
+    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);
     SDL_Rect right_Light = {493, 433, 20, 20};
     SDL_RenderFillRect(renderer, &right_Light);
     
-    // Straight light - controlled by traffic signal
-    if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
-    else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
+    // straight light 
+    if(isRed) 
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+    else 
+        SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);
     SDL_Rect straight_Light = {493, 393, 20, 20};
     SDL_RenderFillRect(renderer, &straight_Light);
 }
 
 void drawLightForD(SDL_Renderer* renderer, bool isRed) {
-    // draw light box
+    SDL_Rect lightBox = {288, 325, 30, 90};
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderDrawRect(renderer, &lightBox);
     SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
-    SDL_Rect lightBox = {288, 325, 30, 90};  // taller box to accommodate both lights
-    SDL_RenderFillRect(renderer, &lightBox);
+    SDL_Rect innerBox = {289, 326, 28, 88};
+    SDL_RenderFillRect(renderer, &innerBox);
     
-    // Left turn light - always green (L3)
-    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
-    SDL_Rect left_turn_Light = {293, 330, 20, 20};  // top position
+    // left turn light - always green
+    SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);
+    SDL_Rect left_turn_Light = {293, 330, 20, 20};
     SDL_RenderFillRect(renderer, &left_turn_Light);
     
-    // Middle lane light - controlled by traffic signal (L2)
-    if(isRed) SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // red
-    else SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);    // green
-    SDL_Rect middle_Light = {293, 380, 20, 20};  // middle lane position
+    // middle lane light
+    if(isRed) 
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+    else 
+        SDL_SetRenderDrawColor(renderer, 11, 156, 50, 255);
+    SDL_Rect middle_Light = {293, 380, 20, 20};
     SDL_RenderFillRect(renderer, &middle_Light);
 }
-
-
-void drawRoadsAndLane(SDL_Renderer *renderer, TTF_Font *font) {
-    SDL_SetRenderDrawColor(renderer, 211,211,211,255);
-    // Vertical road
-    
-    SDL_Rect verticalRoad = {WINDOW_WIDTH / 2 - ROAD_WIDTH / 2, 0, ROAD_WIDTH, WINDOW_HEIGHT};
-    SDL_RenderFillRect(renderer, &verticalRoad);
-
-    // Horizontal road
-    SDL_Rect horizontalRoad = {0, WINDOW_HEIGHT / 2 - ROAD_WIDTH / 2, WINDOW_WIDTH, ROAD_WIDTH};
-    SDL_RenderFillRect(renderer, &horizontalRoad);
-    // draw horizontal lanes
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    for(int i=0; i<=3; i++){
-        // Horizontal lanes
-        SDL_RenderDrawLine(renderer, 
-            0, WINDOW_HEIGHT/2 - ROAD_WIDTH/2 + LANE_WIDTH*i,  // x1,y1
-            WINDOW_WIDTH/2 - ROAD_WIDTH/2, WINDOW_HEIGHT/2 - ROAD_WIDTH/2 + LANE_WIDTH*i // x2, y2
-        );
-        SDL_RenderDrawLine(renderer, 
-            800, WINDOW_HEIGHT/2 - ROAD_WIDTH/2 + LANE_WIDTH*i,
-            WINDOW_WIDTH/2 + ROAD_WIDTH/2, WINDOW_HEIGHT/2 - ROAD_WIDTH/2 + LANE_WIDTH*i
-        );
-        // Vertical lanes
-        SDL_RenderDrawLine(renderer,
-            WINDOW_WIDTH/2 - ROAD_WIDTH/2 + LANE_WIDTH*i, 0,
-            WINDOW_WIDTH/2 - ROAD_WIDTH/2 + LANE_WIDTH*i, WINDOW_HEIGHT/2 - ROAD_WIDTH/2
-        );
-        SDL_RenderDrawLine(renderer,
-            WINDOW_WIDTH/2 - ROAD_WIDTH/2 + LANE_WIDTH*i, 800,
-            WINDOW_WIDTH/2 - ROAD_WIDTH/2 + LANE_WIDTH*i, WINDOW_HEIGHT/2 + ROAD_WIDTH/2
-        );
-    }
-    displayText(renderer, font, "A",400, 10);
-    displayText(renderer, font, "B",400,770);
-    displayText(renderer, font, "D",10,400);
-    displayText(renderer, font, "C",770,400);
-    
-}
-
 
 void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int y){
     // display necessary text

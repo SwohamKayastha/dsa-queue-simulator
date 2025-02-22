@@ -135,7 +135,7 @@ void* readAndParseFile(void* arg);
 void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos);
 void drawVehiclesFromQueue(SDL_Renderer *renderer, TTF_Font *font, VehicleQueue *queue);
 void drawVehicles(SDL_Renderer *renderer, TTF_Font *font);
-void updateVehicles();
+void updateVehicles(SharedData* sharedData);
 void* processVehiclesSequentially(void* arg);
 
 void printMessageHelper(const char* message, int count) {
@@ -181,7 +181,7 @@ int main(int argc, char* argv[]) {
     while (running) {
         while (SDL_PollEvent(&event))
             if (event.type == SDL_QUIT) running = false;
-        updateVehicles();  // Update positions for animation
+        updateVehicles(&sharedData);  // now synced with traffic lightr animation
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderClear(renderer);
         drawRoadsAndLane(renderer, font);
@@ -380,7 +380,7 @@ void drawRoadsAndLane(SDL_Renderer *renderer, TTF_Font *font) {
          displayText(renderer, font, label, labelX, roadD_centerY);
     }
     
-    // Intersection direction labels (for clarity)
+    // Intersection direction labels
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     displayText(renderer, font, "A", WINDOW_WIDTH/2, 10);
     displayText(renderer, font, "B", WINDOW_WIDTH/2, WINDOW_HEIGHT - 30);
@@ -485,7 +485,7 @@ void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int 
     SDL_FreeSurface(textSurface);
     SDL_Rect textRect = {x,y,0,0 };
     SDL_QueryTexture(texture, NULL, NULL, &textRect.w, &textRect.h);
-    SDL_Log("DIM of SDL_Rect %d %d %d %d", textRect.x, textRect.y, textRect.h, textRect.w);
+    // SDL_Log("DIM of SDL_Rect %d %d %d %d", textRect.x, textRect.y, textRect.h, textRect.w);
     // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     // SDL_Log("TTF_Error: %s\n", TTF_GetError());
     SDL_RenderCopy(renderer, texture, NULL, &textRect);
@@ -493,9 +493,11 @@ void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int 
 }
 
 
-// --- Modified refreshLight() with debounce mechanism ---
 void refreshLight(SDL_Renderer *renderer, SharedData* sharedData) {
     if(sharedData->nextLight == sharedData->currentLight) return;
+    
+    
+    
     if(sharedData->nextLight == 0) {
         drawLightForA(renderer, true);
         drawLightForB(renderer, true);
@@ -547,7 +549,6 @@ void* chequeQueue(void* arg) {
     }
     return NULL;
 }
-
 
 void* readAndParseFile(void* arg) {
     while (1) {
@@ -610,7 +611,7 @@ void* readAndParseFile(void* arg) {
 void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos) {
     int w = 20, h = 10;
     int x = 0, y = 0;
-    // using animPos for dynamic positioning based on lane:
+    // animPos for dynamic positioning based on lane:
     switch(v->lane) {
         case 'A': 
             x = WINDOW_WIDTH/2 + 10;
@@ -663,7 +664,8 @@ void drawVehicles(SDL_Renderer *renderer, TTF_Font *font) {
     drawVehiclesFromQueue(renderer, font, queueD);
 }
 
-void updateVehicles() {
+
+void updateVehicles(SharedData* sharedData) {
     float speed = 0.05f;  // adjust to slow down the vehicles
     Uint32 currentTime = SDL_GetTicks();
     static Uint32 lastTime = 0;
@@ -672,35 +674,50 @@ void updateVehicles() {
     Uint32 delta = currentTime - lastTime;
     lastTime = currentTime;
 
-    // Update lane A (moving downward)
+    // Determine active lane letter based on sharedData->currentLight
+    char activeLane = '\0';
+    if (sharedData->currentLight == 1) activeLane = 'A';
+    else if (sharedData->currentLight == 2) activeLane = 'B';
+    else if (sharedData->currentLight == 3) activeLane = 'C';
+    else if (sharedData->currentLight == 4) activeLane = 'D';
+    
+    // Update lane A vehicles only if active and lane is 'A'
     pthread_mutex_lock(&queueA->lock);
-    for (int i = 0; i < queueA->size; i++) {
-        int idx = (queueA->front + i) % MAX_QUEUE_SIZE;
-        queueA->vehicles[idx]->animPos += speed * delta;
+    if (activeLane == 'A') {
+        for (int i = 0; i < queueA->size; i++) {
+            int idx = (queueA->front + i) % MAX_QUEUE_SIZE;
+            queueA->vehicles[idx]->animPos += speed * delta;
+        }
     }
     pthread_mutex_unlock(&queueA->lock);
 
-    // Update lane B (moving upward)
+    // Update lane B vehicles only if active and lane is 'B'
     pthread_mutex_lock(&queueB->lock);
-    for (int i = 0; i < queueB->size; i++) {
-        int idx = (queueB->front + i) % MAX_QUEUE_SIZE;
-        queueB->vehicles[idx]->animPos -= speed * delta;
+    if (activeLane == 'B') {
+        for (int i = 0; i < queueB->size; i++) {
+            int idx = (queueB->front + i) % MAX_QUEUE_SIZE;
+            queueB->vehicles[idx]->animPos += speed * delta;
+        }
     }
     pthread_mutex_unlock(&queueB->lock);
 
-    // Update lane C (moving leftward)
+    // Update lane C vehicles only if active and lane is 'C'
     pthread_mutex_lock(&queueC->lock);
-    for (int i = 0; i < queueC->size; i++) {
-        int idx = (queueC->front + i) % MAX_QUEUE_SIZE;
-        queueC->vehicles[idx]->animPos -= speed * delta;
+    if (activeLane == 'C') {
+        for (int i = 0; i < queueC->size; i++) {
+            int idx = (queueC->front + i) % MAX_QUEUE_SIZE;
+            queueC->vehicles[idx]->animPos += speed * delta;
+        }
     }
     pthread_mutex_unlock(&queueC->lock);
 
-    // Update lane D (moving rightward)
+    // Update lane D vehicles only if active and lane is 'D'
     pthread_mutex_lock(&queueD->lock);
-    for (int i = 0; i < queueD->size; i++) {
-        int idx = (queueD->front + i) % MAX_QUEUE_SIZE;
-        queueD->vehicles[idx]->animPos += speed * delta;
+    if (activeLane == 'D') {
+        for (int i = 0; i < queueD->size; i++) {
+            int idx = (queueD->front + i) % MAX_QUEUE_SIZE;
+            queueD->vehicles[idx]->animPos += speed * delta;
+        }
     }
     pthread_mutex_unlock(&queueD->lock);
 }

@@ -623,35 +623,46 @@ void* readAndParseFile(void* arg) {
 void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos) {
     int w = 20, h = 10;
     int x = 0, y = 0;
-    // animPos for dynamic positioning based on lane:
+    // Lateral separation offset based on queue position
+    int offset = (pos % 2 == 0) ? -10 : 10;
+
     switch(v->lane) {
-        case 'A': 
-            x = WINDOW_WIDTH/2 + 10;
-            y = (int)v->animPos;  // lane A: y-coordinate from animPos
+        case 'A': {
+            // For vehicles from the north, center x is at WINDOW_WIDTH/2.
+            x = WINDOW_WIDTH/2 - w/2;
+            y = (int)v->animPos;
             break;
-        case 'B': 
-            x = WINDOW_WIDTH/2 + 10;
-            y = (int)v->animPos;  // lane B: y-coordinate from animPos (decreases over time)
+        }
+        case 'B': {
+            // For vehicles from the south, center x is also at WINDOW_WIDTH/2.
+            x = WINDOW_WIDTH/2 - w/2;
+            y = (int)v->animPos;
             break;
-        case 'C': 
-            x = (int)v->animPos;  // lane C: x-coordinate from animPos (decreases)
-            y = WINDOW_HEIGHT/2 + 10;
+        }
+        case 'C': {
+            // For vehicles from the east, center y is at WINDOW_HEIGHT/2.
+            y = WINDOW_HEIGHT/2 - h/2;
+            x = (int)v->animPos;
             break;
-        case 'D': 
-            x = (int)v->animPos;  // lane D: x-coordinate from animPos (increases)
-            y = WINDOW_HEIGHT/2 + 10;
+        }
+        case 'D': {
+            // For vehicles from the west, use the center y.
+            y = WINDOW_HEIGHT/2 - h/2;
+            x = (int)v->animPos;
             break;
+        }
         default:
-            break;
+            x = WINDOW_WIDTH/2 + 10;
+            y = (int)v->animPos;
     }
-    // using red for emergency vehicles, otherwise blue.
+    
     if(v->isEmergency)
         SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
     else
         SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
     SDL_Rect rect = { x, y, w, h };
     SDL_RenderFillRect(renderer, &rect);
-    // drawing the vehicle ID above the rectangle.
+    
     char idLabel[MAX_VEHICLE_ID];
     strncpy(idLabel, v->id, MAX_VEHICLE_ID);
     idLabel[MAX_VEHICLE_ID-1] = '\0';
@@ -685,68 +696,92 @@ void updateVehicles(SharedData* sharedData) {
         lastTime = currentTime;
     Uint32 delta = currentTime - lastTime;
     lastTime = currentTime;
-
-    // Determine active lane letter based on sharedData->currentLight
+    
+    // active lane letter based on sharedData->currentLight.
     char activeLane = '\0';
     if (sharedData->currentLight == 1) activeLane = 'A';
     else if (sharedData->currentLight == 2) activeLane = 'B';
     else if (sharedData->currentLight == 3) activeLane = 'C';
     else if (sharedData->currentLight == 4) activeLane = 'D';
-    
-    // Lane A: vehicles coming from north, move downward (y increases)
+
+    // stop-line positions for each lane (line end of each lane)
+    int stopA = WINDOW_HEIGHT/2 - ROAD_WIDTH/2; // lane A (from north)
+    int stopB = WINDOW_HEIGHT/2 + ROAD_WIDTH/2; // lane B (from south)
+    int stopC = WINDOW_WIDTH/2 + ROAD_WIDTH/2;  // lane C (from east)
+    int stopD = WINDOW_WIDTH/2 - ROAD_WIDTH/2;  // lane D (from west)
+
+    // Lane A (coming from north, moving downward)
     pthread_mutex_lock(&queueA->lock);
-    if (activeLane == 'A') {
-        for (int i = 0; i < queueA->size; i++) {
-            int idx = (queueA->front + i) % MAX_QUEUE_SIZE;
-            queueA->vehicles[idx]->animPos += speed * delta;
+    for (int i = 0; i < queueA->size; i++) {
+        int idx = (queueA->front + i) % MAX_QUEUE_SIZE;
+        Vehicle *v = queueA->vehicles[idx];
+        if (activeLane == 'A') {
+            // Green: update normally.
+            v->animPos += speed * delta;
+        } else {
+            // Red: move until the stop-line then stop.
+            if (v->animPos < stopA) {
+                float nextPos = v->animPos + speed * delta;
+                v->animPos = (nextPos > stopA) ? stopA : nextPos;
+            }
         }
     }
-    // Remove lane A vehicles that exit the window (y > WINDOW_HEIGHT)
-    while (!isQueueEmpty(queueA) && queueA->vehicles[queueA->front]->animPos > WINDOW_HEIGHT) {
-        dequeueUnlocked(queueA);  // unlocked version (lock already held)
-    }
+    while (!isQueueEmpty(queueA) && queueA->vehicles[queueA->front]->animPos > WINDOW_HEIGHT)
+        dequeueUnlocked(queueA);
     pthread_mutex_unlock(&queueA->lock);
 
-    // Lane B: vehicles coming from south, move upward (y decreases)
+    // Lane B (coming from south, moving upward)
     pthread_mutex_lock(&queueB->lock);
-    if (activeLane == 'B') {
-        for (int i = 0; i < queueB->size; i++) {
-            int idx = (queueB->front + i) % MAX_QUEUE_SIZE;
-            queueB->vehicles[idx]->animPos -= speed * delta;
+    for (int i = 0; i < queueB->size; i++) {
+        int idx = (queueB->front + i) % MAX_QUEUE_SIZE;
+        Vehicle *v = queueB->vehicles[idx];
+        if (activeLane == 'B') {
+            v->animPos -= speed * delta;
+        } else {
+            if (v->animPos > stopB) {
+                float nextPos = v->animPos - speed * delta;
+                v->animPos = (nextPos < stopB) ? stopB : nextPos;
+            }
         }
     }
-    // Remove lane B vehicles once they leave the window (y < 0)
-    while (!isQueueEmpty(queueB) && queueB->vehicles[queueB->front]->animPos < 0) {
+    while (!isQueueEmpty(queueB) && queueB->vehicles[queueB->front]->animPos < 0)
         dequeueUnlocked(queueB);
-    }
     pthread_mutex_unlock(&queueB->lock);
 
-    // Lane C: vehicles coming from east, move left (x decreases)
+    // Lane C (coming from east, moving leftward)
     pthread_mutex_lock(&queueC->lock);
-    if (activeLane == 'C') {
-        for (int i = 0; i < queueC->size; i++) {
-            int idx = (queueC->front + i) % MAX_QUEUE_SIZE;
-            queueC->vehicles[idx]->animPos -= speed * delta;
+    for (int i = 0; i < queueC->size; i++) {
+        int idx = (queueC->front + i) % MAX_QUEUE_SIZE;
+        Vehicle *v = queueC->vehicles[idx];
+        if (activeLane == 'C') {
+            v->animPos -= speed * delta;
+        } else {
+            if (v->animPos > stopC) {
+                float nextPos = v->animPos - speed * delta;
+                v->animPos = (nextPos < stopC) ? stopC : nextPos;
+            }
         }
     }
-    // Remove lane C vehicles once they leave the window (x < 0)
-    while (!isQueueEmpty(queueC) && queueC->vehicles[queueC->front]->animPos < 0) {
+    while (!isQueueEmpty(queueC) && queueC->vehicles[queueC->front]->animPos < 0)
         dequeueUnlocked(queueC);
-    }
     pthread_mutex_unlock(&queueC->lock);
 
-    // Lane D: vehicles coming from west, move right (x increases)
+    // Lane D (coming from west, moving rightward)
     pthread_mutex_lock(&queueD->lock);
-    if (activeLane == 'D') {
-        for (int i = 0; i < queueD->size; i++) {
-            int idx = (queueD->front + i) % MAX_QUEUE_SIZE;
-            queueD->vehicles[idx]->animPos += speed * delta;
+    for (int i = 0; i < queueD->size; i++) {
+        int idx = (queueD->front + i) % MAX_QUEUE_SIZE;
+        Vehicle *v = queueD->vehicles[idx];
+        if (activeLane == 'D') {
+            v->animPos += speed * delta;
+        } else {
+            if (v->animPos < stopD) {
+                float nextPos = v->animPos + speed * delta;
+                v->animPos = (nextPos > stopD) ? stopD : nextPos;
+            }
         }
     }
-    // Remove lane D vehicles once they leave the window (x > WINDOW_WIDTH)
-    while (!isQueueEmpty(queueD) && queueD->vehicles[queueD->front]->animPos > WINDOW_WIDTH) {
+    while (!isQueueEmpty(queueD) && queueD->vehicles[queueD->front]->animPos > WINDOW_WIDTH)
         dequeueUnlocked(queueD);
-    }
     pthread_mutex_unlock(&queueD->lock);
 }
 

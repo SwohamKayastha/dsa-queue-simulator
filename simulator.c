@@ -45,6 +45,7 @@ typedef struct {
     int arrivalTime;
     bool isEmergency;
     int lane_number;        // 1 for left, 2 for middle, 3 for right
+    float animPos;          // field for animation
 } Vehicle;
 
 // Queue structure
@@ -134,9 +135,11 @@ void* readAndParseFile(void* arg);
 void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos);
 void drawVehiclesFromQueue(SDL_Renderer *renderer, TTF_Font *font, VehicleQueue *queue);
 void drawVehicles(SDL_Renderer *renderer, TTF_Font *font);
-
+void updateVehicles();
+void* processVehiclesSequentially(void* arg);
 
 void printMessageHelper(const char* message, int count) {
+    for (int i = 0; i < count; i++) printf("%s\n", message);
     for (int i = 0; i < count; i++) printf("%s\n", message);
 }
 
@@ -170,17 +173,22 @@ int main(int argc, char* argv[]) {
     // we need to create seprate long running thread for the queue processing and light
     // pthread_create(&tLight, NULL, refreshLight, &sharedData);
     pthread_create(&tQueue, NULL, chequeQueue, &sharedData);
-    pthread_create(&tReadFile, NULL, readAndParseFile, NULL);
+    pthread_create(&tReadFile, NULL, processVehiclesSequentially, NULL);
     // readAndParseFile();
 
     // Continue the UI thread
     bool running = true;
     while (running) {
-        // update light
-        refreshLight(renderer, &sharedData);
-        drawVehicles(renderer, font);
         while (SDL_PollEvent(&event))
             if (event.type == SDL_QUIT) running = false;
+        updateVehicles();  // Update positions for animation
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderClear(renderer);
+        drawRoadsAndLane(renderer, font);
+        refreshLight(renderer, &sharedData);
+        drawVehicles(renderer, font);
+        SDL_RenderPresent(renderer);
+        SDL_Delay(16); // ~60 FPS
     }
     SDL_DestroyMutex(mutex);
     if (renderer) SDL_DestroyRenderer(renderer);
@@ -485,46 +493,41 @@ void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int 
 }
 
 
+// --- Modified refreshLight() with debounce mechanism ---
 void refreshLight(SDL_Renderer *renderer, SharedData* sharedData) {
-    if(sharedData->nextLight == sharedData->currentLight) return; // early return
-
-    // All lights red
+    if(sharedData->nextLight == sharedData->currentLight) return;
     if(sharedData->nextLight == 0) {
         drawLightForA(renderer, true);
         drawLightForB(renderer, true);
         drawLightForC(renderer, true);
         drawLightForD(renderer, true);
     }
-    // Lane A green
     else if(sharedData->nextLight == 1) {
         drawLightForA(renderer, false);
         drawLightForB(renderer, true);
         drawLightForC(renderer, true);
         drawLightForD(renderer, true);
     }
-    // Lane B green
     else if(sharedData->nextLight == 2) {
         drawLightForA(renderer, true);
         drawLightForB(renderer, false);
         drawLightForC(renderer, true);
         drawLightForD(renderer, true);
     }
-    // Lane C green
     else if(sharedData->nextLight == 3) {
         drawLightForA(renderer, true);
         drawLightForB(renderer, true);
         drawLightForC(renderer, false);
         drawLightForD(renderer, true);
     }
-    // Lane D green
     else if(sharedData->nextLight == 4) {
         drawLightForA(renderer, true);
         drawLightForB(renderer, true);
         drawLightForC(renderer, true);
         drawLightForD(renderer, false);
     }
-
-    SDL_RenderPresent(renderer);
+    
+    // Only update the stored state after debounce
     printf("Light of queue updated from %d to %d\n", sharedData->currentLight, sharedData->nextLight);
     sharedData->currentLight = sharedData->nextLight;
     fflush(stdout);
@@ -533,35 +536,34 @@ void refreshLight(SDL_Renderer *renderer, SharedData* sharedData) {
 void* chequeQueue(void* arg) {
     SharedData* sharedData = (SharedData*)arg;
     while (1) {
-        // All red
+        // All lights red
         sharedData->nextLight = 0;
         sleep(2);
         // Cycle through each lane
-        for(int lane = 1; lane <= 4; lane++) {
+        for (int lane = 1; lane <= 4; lane++) {
             sharedData->nextLight = lane;
             sleep(5);
         }
     }
+    return NULL;
 }
 
 
 void* readAndParseFile(void* arg) {
-    while(1){ 
+    while (1) {
         FILE* file = fopen(VEHICLE_FILE, "r");
         if (!file) {
             perror("Error opening file");
+            sleep(2);
             continue;
         }
-
         char line[MAX_LINE_LENGTH];
         while (fgets(line, sizeof(line), file)) {
             // Remove newline if present
             line[strcspn(line, "\n")] = 0;
-            
             // Split using ':'
             char* vehicleNumber = strtok(line, ":");
             char* road = strtok(NULL, ":");
-
             if (vehicleNumber && road) {
                 Vehicle* newVehicle = (Vehicle*)malloc(sizeof(Vehicle));
                 strncpy(newVehicle->id, vehicleNumber, MAX_VEHICLE_ID - 1);
@@ -569,14 +571,26 @@ void* readAndParseFile(void* arg) {
                 newVehicle->lane = road[0];
                 newVehicle->arrivalTime = time(NULL);
                 newVehicle->isEmergency = (strstr(vehicleNumber, "EMG") != NULL);
-                
-                // lane number based on vehicle ID format
-                if (strstr(vehicleNumber, "L1")) newVehicle->lane_number = 1;
-                else if (strstr(vehicleNumber, "L2")) newVehicle->lane_number = 2;
-                else if (strstr(vehicleNumber, "L3")) newVehicle->lane_number = 3;
-                else newVehicle->lane_number = 2; // default to middle lane
 
-                // eneque the vehicle to the respective lane
+                if (strstr(vehicleNumber, "L1"))
+                    newVehicle->lane_number = 1;
+                else if (strstr(vehicleNumber, "L2"))
+                    newVehicle->lane_number = 2;
+                else if (strstr(vehicleNumber, "L3"))
+                    newVehicle->lane_number = 3;
+                else 
+                    newVehicle->lane_number = 2; // default
+
+                // Initialize animPos based on lane:
+                if (road[0] == 'A')
+                    newVehicle->animPos = 0.0f;                
+                else if (road[0] == 'B')
+                    newVehicle->animPos = (float)WINDOW_HEIGHT;
+                else if (road[0] == 'C')
+                    newVehicle->animPos = (float)WINDOW_WIDTH;
+                else if (road[0] == 'D')
+                    newVehicle->animPos = 0.0f;
+
                 switch(newVehicle->lane) {
                     case 'A': enqueue(queueA, newVehicle); break;
                     case 'B': enqueue(queueB, newVehicle); break;
@@ -587,34 +601,31 @@ void* readAndParseFile(void* arg) {
             }
         }
         fclose(file);
-        sleep(2); // manage this time
+        sleep(2);
     }
+    return NULL;
 }
 
 // drwaing a single vehicle as a colored rectangle and optionally display its ID.
 void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos) {
     int w = 20, h = 10;
     int x = 0, y = 0;
-    // positioning vehicles
+    // using animPos for dynamic positioning based on lane:
     switch(v->lane) {
         case 'A': 
-            // Road A (north)
             x = WINDOW_WIDTH/2 + 10;
-            y = 10 + pos * (h + 5);
+            y = (int)v->animPos;  // lane A: y-coordinate from animPos
             break;
         case 'B': 
-            // Road B (south)
             x = WINDOW_WIDTH/2 + 10;
-            y = WINDOW_HEIGHT - (pos * (h + 5) + 10 + h);
+            y = (int)v->animPos;  // lane B: y-coordinate from animPos (decreases over time)
             break;
         case 'C': 
-            // Road C (east)
-            x = WINDOW_WIDTH - (pos * (w + 5) + 10 + w);
+            x = (int)v->animPos;  // lane C: x-coordinate from animPos (decreases)
             y = WINDOW_HEIGHT/2 + 10;
             break;
         case 'D': 
-            // Road D (west)
-            x = 10 + pos * (w + 5);
+            x = (int)v->animPos;  // lane D: x-coordinate from animPos (increases)
             y = WINDOW_HEIGHT/2 + 10;
             break;
         default:
@@ -627,7 +638,6 @@ void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos) {
         SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
     SDL_Rect rect = { x, y, w, h };
     SDL_RenderFillRect(renderer, &rect);
-    
     // drawing the vehicle ID above the rectangle.
     char idLabel[MAX_VEHICLE_ID];
     strncpy(idLabel, v->id, MAX_VEHICLE_ID);
@@ -651,4 +661,108 @@ void drawVehicles(SDL_Renderer *renderer, TTF_Font *font) {
     drawVehiclesFromQueue(renderer, font, queueB);
     drawVehiclesFromQueue(renderer, font, queueC);
     drawVehiclesFromQueue(renderer, font, queueD);
+}
+
+void updateVehicles() {
+    float speed = 0.05f;  // adjust to slow down the vehicles
+    Uint32 currentTime = SDL_GetTicks();
+    static Uint32 lastTime = 0;
+    if (lastTime == 0) 
+        lastTime = currentTime;
+    Uint32 delta = currentTime - lastTime;
+    lastTime = currentTime;
+
+    // Update lane A (moving downward)
+    pthread_mutex_lock(&queueA->lock);
+    for (int i = 0; i < queueA->size; i++) {
+        int idx = (queueA->front + i) % MAX_QUEUE_SIZE;
+        queueA->vehicles[idx]->animPos += speed * delta;
+    }
+    pthread_mutex_unlock(&queueA->lock);
+
+    // Update lane B (moving upward)
+    pthread_mutex_lock(&queueB->lock);
+    for (int i = 0; i < queueB->size; i++) {
+        int idx = (queueB->front + i) % MAX_QUEUE_SIZE;
+        queueB->vehicles[idx]->animPos -= speed * delta;
+    }
+    pthread_mutex_unlock(&queueB->lock);
+
+    // Update lane C (moving leftward)
+    pthread_mutex_lock(&queueC->lock);
+    for (int i = 0; i < queueC->size; i++) {
+        int idx = (queueC->front + i) % MAX_QUEUE_SIZE;
+        queueC->vehicles[idx]->animPos -= speed * delta;
+    }
+    pthread_mutex_unlock(&queueC->lock);
+
+    // Update lane D (moving rightward)
+    pthread_mutex_lock(&queueD->lock);
+    for (int i = 0; i < queueD->size; i++) {
+        int idx = (queueD->front + i) % MAX_QUEUE_SIZE;
+        queueD->vehicles[idx]->animPos += speed * delta;
+    }
+    pthread_mutex_unlock(&queueD->lock);
+}
+
+// delay reduced to 3 sec
+void* processVehiclesSequentially(void* arg) {
+    FILE* file = fopen(VEHICLE_FILE, "r");
+    if (!file) {
+        perror("Error opening file");
+        return NULL;
+    }
+    char **lines = NULL;
+    size_t count = 0;
+    char buffer[MAX_LINE_LENGTH];
+    while (fgets(buffer, sizeof(buffer), file)) {
+        buffer[strcspn(buffer, "\n")] = 0;
+        lines = realloc(lines, sizeof(char*) * (count + 1));
+        lines[count] = strdup(buffer);
+        count++;
+    }
+    fclose(file);
+
+    for (size_t i = 0; i < count; i++) {
+        char* line = lines[i];
+        char* vehicleNumber = strtok(line, ":");
+        char* road = strtok(NULL, ":");
+        if (vehicleNumber && road) {
+            Vehicle* newVehicle = (Vehicle*)malloc(sizeof(Vehicle));
+            strncpy(newVehicle->id, vehicleNumber, MAX_VEHICLE_ID - 1);
+            newVehicle->id[MAX_VEHICLE_ID - 1] = '\0';
+            newVehicle->lane = road[0];
+            newVehicle->arrivalTime = time(NULL);
+            newVehicle->isEmergency = (strstr(vehicleNumber, "EMG") != NULL);
+            if (strstr(vehicleNumber, "L1"))
+                newVehicle->lane_number = 1;
+            else if (strstr(vehicleNumber, "L2"))
+                newVehicle->lane_number = 2;
+            else if (strstr(vehicleNumber, "L3"))
+                newVehicle->lane_number = 3;
+            else
+                newVehicle->lane_number = 2;
+            if (road[0] == 'A')
+                newVehicle->animPos = 0.0f;
+            else if (road[0] == 'B')
+                newVehicle->animPos = (float)WINDOW_HEIGHT;
+            else if (road[0] == 'C')
+                newVehicle->animPos = (float)WINDOW_WIDTH;
+            else if (road[0] == 'D')
+                newVehicle->animPos = 0.0f;
+            switch(newVehicle->lane) {
+                case 'A': enqueue(queueA, newVehicle); break;
+                case 'B': enqueue(queueB, newVehicle); break;
+                case 'C': enqueue(queueC, newVehicle); break;
+                case 'D': enqueue(queueD, newVehicle); break;
+                default: free(newVehicle);
+            }
+        }
+        sleep(3); // Delay 3 seconds between vehicles
+    }
+    for (size_t i = 0; i < count; i++) {
+        free(lines[i]);
+    }
+    free(lines);
+    return NULL;
 }

@@ -507,45 +507,44 @@ void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int 
 
 
 void refreshLight(SDL_Renderer *renderer, SharedData* sharedData) {
-    if(sharedData->nextLight == sharedData->currentLight) return;
-    
-    
-    
-    if(sharedData->nextLight == 0) {
+    // Always display the traffic lights according to nextLight state
+    if (sharedData->nextLight == 0) {
         drawLightForA(renderer, true);
         drawLightForB(renderer, true);
         drawLightForC(renderer, true);
         drawLightForD(renderer, true);
     }
-    else if(sharedData->nextLight == 1) {
+    else if (sharedData->nextLight == 1) {
         drawLightForA(renderer, false);
         drawLightForB(renderer, true);
         drawLightForC(renderer, true);
         drawLightForD(renderer, true);
     }
-    else if(sharedData->nextLight == 2) {
+    else if (sharedData->nextLight == 2) {
         drawLightForA(renderer, true);
         drawLightForB(renderer, false);
         drawLightForC(renderer, true);
         drawLightForD(renderer, true);
     }
-    else if(sharedData->nextLight == 3) {
+    else if (sharedData->nextLight == 3) {
         drawLightForA(renderer, true);
         drawLightForB(renderer, true);
         drawLightForC(renderer, false);
         drawLightForD(renderer, true);
     }
-    else if(sharedData->nextLight == 4) {
+    else if (sharedData->nextLight == 4) {
         drawLightForA(renderer, true);
         drawLightForB(renderer, true);
         drawLightForC(renderer, true);
         drawLightForD(renderer, false);
     }
     
-    // Only update the stored state after debounce
-    printf("Light of queue updated from %d to %d\n", sharedData->currentLight, sharedData->nextLight);
-    sharedData->currentLight = sharedData->nextLight;
-    fflush(stdout);
+    // log only if there's a change in state.
+    if (sharedData->nextLight != sharedData->currentLight) {
+         printf("Light updated from %d to %d\n", sharedData->currentLight, sharedData->nextLight);
+         sharedData->currentLight = sharedData->nextLight;
+         fflush(stdout);
+    }
 }
 
 void* chequeQueue(void* arg) {

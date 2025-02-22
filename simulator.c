@@ -28,6 +28,9 @@ process the queue and visualize them*/
 #define ARROW_SIZE 15
 #define MAX_QUEUE_SIZE 100
 #define MAX_VEHICLE_ID 20
+#define VEHICLE_LENGTH 20  // Length of vehicle rectangle
+#define VEHICLE_GAP 15    // Minimum gap between vehicles
+#define VEHICLE_WIDTH 10  // Width of vehicle rectangle
 
 
 const char* VEHICLE_FILE = "vehicles.data";
@@ -689,7 +692,7 @@ void drawVehicles(SDL_Renderer *renderer, TTF_Font *font) {
 
 
 void updateVehicles(SharedData* sharedData) {
-    float speed = 0.05f;  // adjust to slow down the vehicles
+    float speed = 0.2f;
     Uint32 currentTime = SDL_GetTicks();
     static Uint32 lastTime = 0;
     if (lastTime == 0) 
@@ -697,87 +700,149 @@ void updateVehicles(SharedData* sharedData) {
     Uint32 delta = currentTime - lastTime;
     lastTime = currentTime;
     
-    // active lane letter based on sharedData->currentLight.
     char activeLane = '\0';
     if (sharedData->currentLight == 1) activeLane = 'A';
     else if (sharedData->currentLight == 2) activeLane = 'B';
     else if (sharedData->currentLight == 3) activeLane = 'C';
     else if (sharedData->currentLight == 4) activeLane = 'D';
 
-    // stop-line positions for each lane (line end of each lane)
-    int stopA = WINDOW_HEIGHT/2 - ROAD_WIDTH/2; // lane A (from north)
-    int stopB = WINDOW_HEIGHT/2 + ROAD_WIDTH/2; // lane B (from south)
-    int stopC = WINDOW_WIDTH/2 + ROAD_WIDTH/2;  // lane C (from east)
-    int stopD = WINDOW_WIDTH/2 - ROAD_WIDTH/2;  // lane D (from west)
+    int stopA = WINDOW_HEIGHT/2 - ROAD_WIDTH/2 - 20;
+    int stopB = WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20;
+    int stopC = WINDOW_WIDTH/2 + ROAD_WIDTH/2 + 20;
+    int stopD = WINDOW_WIDTH/2 - ROAD_WIDTH/2 - 20;
 
-    // Lane A (coming from north, moving downward)
+    // Lane A (north to south)
     pthread_mutex_lock(&queueA->lock);
     for (int i = 0; i < queueA->size; i++) {
         int idx = (queueA->front + i) % MAX_QUEUE_SIZE;
         Vehicle *v = queueA->vehicles[idx];
-        if (activeLane == 'A') {
-            // Green: update normally.
-            v->animPos += speed * delta;
-        } else {
-            // Red: move until the stop-line then stop.
-            if (v->animPos < stopA) {
-                float nextPos = v->animPos + speed * delta;
+        // if (activeLane == 'A') {
+        //     // Green: update normally.
+        //     v->animPos += speed * delta;
+        // } else {
+        //     // Red: move until the stop-line then stop.
+        //     if (v->animPos < stopA) {
+        //         float nextPos = v->animPos + speed * delta;
+        //         v->animPos = (nextPos > stopA) ? stopA : nextPos;
+        //     }
+        // }
+        float nextPos = v->animPos + speed * delta;
+        
+        // Check for vehicle ahead
+        bool canMove = true;
+        if (i > 0) {
+            int prevIdx = (queueA->front + i - 1) % MAX_QUEUE_SIZE;
+            Vehicle *ahead = queueA->vehicles[prevIdx];
+            if (nextPos + VEHICLE_LENGTH + VEHICLE_GAP > ahead->animPos) {
+                canMove = false;
+                nextPos = ahead->animPos - VEHICLE_LENGTH - VEHICLE_GAP;
+            }
+        }
+
+        if (canMove) {
+            if (activeLane == 'A' || v->animPos > WINDOW_HEIGHT/2) {
+                v->animPos = nextPos;
+            } else if (v->animPos < stopA) {
                 v->animPos = (nextPos > stopA) ? stopA : nextPos;
             }
+        } else {
+            v->animPos = nextPos;
         }
     }
     while (!isQueueEmpty(queueA) && queueA->vehicles[queueA->front]->animPos > WINDOW_HEIGHT)
         dequeueUnlocked(queueA);
     pthread_mutex_unlock(&queueA->lock);
 
-    // Lane B (coming from south, moving upward)
+    // Lane B (south to north)
     pthread_mutex_lock(&queueB->lock);
     for (int i = 0; i < queueB->size; i++) {
         int idx = (queueB->front + i) % MAX_QUEUE_SIZE;
         Vehicle *v = queueB->vehicles[idx];
-        if (activeLane == 'B') {
-            v->animPos -= speed * delta;
-        } else {
-            if (v->animPos > stopB) {
-                float nextPos = v->animPos - speed * delta;
+        float nextPos = v->animPos - speed * delta;
+        
+        // Check for vehicle ahead
+        bool canMove = true;
+        if (i > 0) {
+            int prevIdx = (queueB->front + i - 1) % MAX_QUEUE_SIZE;
+            Vehicle *ahead = queueB->vehicles[prevIdx];
+            if (nextPos - VEHICLE_LENGTH - VEHICLE_GAP < ahead->animPos) {
+                canMove = false;
+                nextPos = ahead->animPos + VEHICLE_LENGTH + VEHICLE_GAP;
+            }
+        }
+
+        if (canMove) {
+            if (activeLane == 'B' || v->animPos < WINDOW_HEIGHT/2) {
+                v->animPos = nextPos;
+            } else if (v->animPos > stopB) {
                 v->animPos = (nextPos < stopB) ? stopB : nextPos;
             }
+        } else {
+            v->animPos = nextPos;
         }
     }
     while (!isQueueEmpty(queueB) && queueB->vehicles[queueB->front]->animPos < 0)
         dequeueUnlocked(queueB);
     pthread_mutex_unlock(&queueB->lock);
 
-    // Lane C (coming from east, moving leftward)
+    // Lane C (east to west)
     pthread_mutex_lock(&queueC->lock);
     for (int i = 0; i < queueC->size; i++) {
         int idx = (queueC->front + i) % MAX_QUEUE_SIZE;
         Vehicle *v = queueC->vehicles[idx];
-        if (activeLane == 'C') {
-            v->animPos -= speed * delta;
-        } else {
-            if (v->animPos > stopC) {
-                float nextPos = v->animPos - speed * delta;
+        float nextPos = v->animPos - speed * delta;
+        
+        // Check for vehicle ahead
+        bool canMove = true;
+        if (i > 0) {
+            int prevIdx = (queueC->front + i - 1) % MAX_QUEUE_SIZE;
+            Vehicle *ahead = queueC->vehicles[prevIdx];
+            if (nextPos - VEHICLE_LENGTH - VEHICLE_GAP < ahead->animPos) {
+                canMove = false;
+                nextPos = ahead->animPos + VEHICLE_LENGTH + VEHICLE_GAP;
+            }
+        }
+
+        if (canMove) {
+            if (activeLane == 'C' || v->animPos < WINDOW_WIDTH/2) {
+                v->animPos = nextPos;
+            } else if (v->animPos > stopC) {
                 v->animPos = (nextPos < stopC) ? stopC : nextPos;
             }
+        } else {
+            v->animPos = nextPos;
         }
     }
     while (!isQueueEmpty(queueC) && queueC->vehicles[queueC->front]->animPos < 0)
         dequeueUnlocked(queueC);
     pthread_mutex_unlock(&queueC->lock);
 
-    // Lane D (coming from west, moving rightward)
+    // Lane D (west to east)
     pthread_mutex_lock(&queueD->lock);
     for (int i = 0; i < queueD->size; i++) {
         int idx = (queueD->front + i) % MAX_QUEUE_SIZE;
         Vehicle *v = queueD->vehicles[idx];
-        if (activeLane == 'D') {
-            v->animPos += speed * delta;
-        } else {
-            if (v->animPos < stopD) {
-                float nextPos = v->animPos + speed * delta;
+        float nextPos = v->animPos + speed * delta;
+        
+        // Check for vehicle ahead
+        bool canMove = true;
+        if (i > 0) {
+            int prevIdx = (queueD->front + i - 1) % MAX_QUEUE_SIZE;
+            Vehicle *ahead = queueD->vehicles[prevIdx];
+            if (nextPos + VEHICLE_LENGTH + VEHICLE_GAP > ahead->animPos) {
+                canMove = false;
+                nextPos = ahead->animPos - VEHICLE_LENGTH - VEHICLE_GAP;
+            }
+        }
+
+        if (canMove) {
+            if (activeLane == 'D' || v->animPos > WINDOW_WIDTH/2) {
+                v->animPos = nextPos;
+            } else if (v->animPos < stopD) {
                 v->animPos = (nextPos > stopD) ? stopD : nextPos;
             }
+        } else {
+            v->animPos = nextPos;
         }
     }
     while (!isQueueEmpty(queueD) && queueD->vehicles[queueD->front]->animPos > WINDOW_WIDTH)

@@ -109,6 +109,19 @@ Vehicle* dequeue(VehicleQueue* queue) {
     return vehicle;
 }
 
+// Added unlocked dequeue version (assumes lock is held)
+Vehicle* dequeueUnlocked(VehicleQueue* queue) {
+    Vehicle* vehicle = NULL;
+    if (!isQueueEmpty(queue)) {
+        vehicle = queue->vehicles[queue->front];
+        queue->front = (queue->front + 1) % MAX_QUEUE_SIZE;
+        queue->size--;
+        printf("Dequeued vehicle %s from lane %c (size: %d) [unlocked]\n", 
+               vehicle->id, vehicle->lane, queue->size);
+    }
+    return vehicle;
+}
+
 // queue cleanup
 void cleanupQueue(VehicleQueue* queue) {
     pthread_mutex_lock(&queue->lock);
@@ -681,7 +694,7 @@ void updateVehicles(SharedData* sharedData) {
     else if (sharedData->currentLight == 3) activeLane = 'C';
     else if (sharedData->currentLight == 4) activeLane = 'D';
     
-    // Update lane A vehicles only if active and lane is 'A'
+    // Lane A: vehicles coming from north, move downward (y increases)
     pthread_mutex_lock(&queueA->lock);
     if (activeLane == 'A') {
         for (int i = 0; i < queueA->size; i++) {
@@ -689,35 +702,51 @@ void updateVehicles(SharedData* sharedData) {
             queueA->vehicles[idx]->animPos += speed * delta;
         }
     }
+    // Remove lane A vehicles that exit the window (y > WINDOW_HEIGHT)
+    while (!isQueueEmpty(queueA) && queueA->vehicles[queueA->front]->animPos > WINDOW_HEIGHT) {
+        dequeueUnlocked(queueA);  // unlocked version (lock already held)
+    }
     pthread_mutex_unlock(&queueA->lock);
 
-    // Update lane B vehicles only if active and lane is 'B'
+    // Lane B: vehicles coming from south, move upward (y decreases)
     pthread_mutex_lock(&queueB->lock);
     if (activeLane == 'B') {
         for (int i = 0; i < queueB->size; i++) {
             int idx = (queueB->front + i) % MAX_QUEUE_SIZE;
-            queueB->vehicles[idx]->animPos += speed * delta;
+            queueB->vehicles[idx]->animPos -= speed * delta;
         }
+    }
+    // Remove lane B vehicles once they leave the window (y < 0)
+    while (!isQueueEmpty(queueB) && queueB->vehicles[queueB->front]->animPos < 0) {
+        dequeueUnlocked(queueB);
     }
     pthread_mutex_unlock(&queueB->lock);
 
-    // Update lane C vehicles only if active and lane is 'C'
+    // Lane C: vehicles coming from east, move left (x decreases)
     pthread_mutex_lock(&queueC->lock);
     if (activeLane == 'C') {
         for (int i = 0; i < queueC->size; i++) {
             int idx = (queueC->front + i) % MAX_QUEUE_SIZE;
-            queueC->vehicles[idx]->animPos += speed * delta;
+            queueC->vehicles[idx]->animPos -= speed * delta;
         }
+    }
+    // Remove lane C vehicles once they leave the window (x < 0)
+    while (!isQueueEmpty(queueC) && queueC->vehicles[queueC->front]->animPos < 0) {
+        dequeueUnlocked(queueC);
     }
     pthread_mutex_unlock(&queueC->lock);
 
-    // Update lane D vehicles only if active and lane is 'D'
+    // Lane D: vehicles coming from west, move right (x increases)
     pthread_mutex_lock(&queueD->lock);
     if (activeLane == 'D') {
         for (int i = 0; i < queueD->size; i++) {
             int idx = (queueD->front + i) % MAX_QUEUE_SIZE;
             queueD->vehicles[idx]->animPos += speed * delta;
         }
+    }
+    // Remove lane D vehicles once they leave the window (x > WINDOW_WIDTH)
+    while (!isQueueEmpty(queueD) && queueD->vehicles[queueD->front]->animPos > WINDOW_WIDTH) {
+        dequeueUnlocked(queueD);
     }
     pthread_mutex_unlock(&queueD->lock);
 }

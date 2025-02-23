@@ -566,7 +566,7 @@ void* chequeQueue(void* arg) {
         // Cycle through each lane
         for (int lane = 1; lane <= 4; lane++) {
             sharedData->nextLight = lane;
-            sleep(5);
+            sleep(3);
         }
     }
     return NULL;
@@ -1022,24 +1022,25 @@ void updateVehicles(SharedData* sharedData) {
             
             if (v->turning) {
                 float turnSpeed = 0.001f;
-                // Use same multiplier as AL2
                 v->turnProgress += delta * turnSpeed * 0.75;
                 if (v->turnProgress > 1.0f)
                     v->turnProgress = 1.0f;
                 float sX = WINDOW_WIDTH/2, sY = stopB;
-                float cX = WINDOW_WIDTH/2 - 50.0f; // control point adjusted for BL2
-                float cY = stopB - ((stopB - stopA) / 2);
-                float eX = WINDOW_WIDTH/2, eY = stopA;
+                // Adjust control points to match CL2 style curve
+                float cX = sX - 50.0f;
+                float targetX = WINDOW_WIDTH/2 - LANE_WIDTH;
+                float targetY = stopA;
+                float cY = sY + (targetY - sY) / 2;
                 float t = v->turnProgress;
-                v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*eX;
-                v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*eY;
+                v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*targetX;
+                v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*targetY;
                 if (v->turnProgress >= 1.0f) {
                     v->lane = 'A';
                     v->lane_number = 1;
                     v->turning = false;
                     v->turnProgress = 0.0f;
-                    v->animPos = eY;
-                    printf("BL2 Vehicle %s completed turn into AL1. Final pos: %f\n", v->id, eY);
+                    v->animPos = targetY;
+                    printf("BL2 Vehicle %s completed turn into AL1. Final pos: %f\n", v->id, targetY);
                 }
                 continue;
             }
@@ -1080,52 +1081,43 @@ void updateVehicles(SharedData* sharedData) {
         
         // For vehicles from road C (CL3) turning into BL1:
         if (v->lane == 'C' && v->lane_number == 3) {
-            // Debug: vehicle moving in CL3
-            printf("Vehicle %s is in CL3, animPos: %f\n", v->id, v->animPos);
-            
-            if (!v->turning) {
-                float nextPos = v->animPos - speed * delta;
-                if (nextPos <= stopC) {
-                    printf("CL3 Vehicle %s starting turn to BL1\n", v->id);
-                    v->turning = true;
+            if (!v->turning && v->animPos <= stopC) {
+                printf("CL3 Vehicle %s starting turn to BL1\n", v->id);
+                v->turning = true;
+                v->turnProgress = 0.0f;
+                v->turnPosX = stopC;
+                v->turnPosY = WINDOW_HEIGHT/2 + LANE_WIDTH;
+            }
+
+            if (v->turning) {
+                float turnSpeed = 0.001f;
+                v->turnProgress += delta * turnSpeed * 0.75;
+                if (v->turnProgress > 1.0f)
+                    v->turnProgress = 1.0f;
+                
+                float t = easeInOutQuad(v->turnProgress);
+                float sX = stopC;
+                float sY = WINDOW_HEIGHT/2 + LANE_WIDTH;
+                float eX = WINDOW_WIDTH/2;
+                float eY = WINDOW_HEIGHT;
+                
+                // Adjust control points for smoother curve
+                float cX = sX - 100.0f;
+                float cY = sY + 100.0f;
+                
+                v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*eX;
+                v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*eY;
+                
+                if (v->turnProgress >= 1.0f) {
+                    v->lane = 'B';
+                    v->lane_number = 1;
+                    v->turning = false;
                     v->turnProgress = 0.0f;
-                    v->turnPosX = stopC;                          // Start at stopC
-                    v->turnPosY = WINDOW_HEIGHT/2 + LANE_WIDTH;   // Bottom lane of C
-                } else {
-                    v->animPos = nextPos;
+                    v->animPos = WINDOW_HEIGHT;
+                    printf("CL3 Vehicle %s completed turn into BL1\n", v->id);
                 }
                 continue;
             }
-
-            // Execute turn similar to AL3's logic:
-            v->turnProgress += speed * delta;
-            if (v->turnProgress > 1.0f) v->turnProgress = 1.0f;
-            
-            float t = v->turnProgress;
-            float startX = stopC;
-            float startY = WINDOW_HEIGHT/2 + LANE_WIDTH;
-            float finalX = WINDOW_WIDTH/2 + LANE_WIDTH/2;     // Center of BL1
-            float finalY = WINDOW_HEIGHT;                     // Bottom edge
-            
-            // Use control point for smooth curve
-            float controlX = (startX + finalX) / 2.0f;       // Halfway point
-            float controlY = startY + 100.0f;                // Offset down for curve
-            
-            calculateTurnCurve(t, startX, startY, controlX, controlY, finalX, finalY,
-                              &v->turnPosX, &v->turnPosY);
-            
-            printf("CL3 Vehicle %s turning: progress=%f, pos=(%f,%f)\n", 
-                   v->id, t, v->turnPosX, v->turnPosY);
-                   
-            if (v->turnProgress >= 1.0f) {
-                v->lane = 'B';               // Switch to road B
-                v->lane_number = 1;          // BL1 (leftmost lane)
-                v->turning = false;
-                v->turnProgress = 0.0f;
-                v->animPos = WINDOW_HEIGHT;  // Start at bottom and move up
-                printf("CL3 Vehicle %s completed turn into BL1, starting from bottom\n", v->id);
-            }
-            continue;
         }
         
         if (v->lane == 'C' && v->lane_number == 2) {
@@ -1213,45 +1205,43 @@ void updateVehicles(SharedData* sharedData) {
         
         // For vehicles from road D (DL3) turning into AL1:
         if (v->lane == 'D' && v->lane_number == 3) {
-            // Move forward until reaching turn point
-            if (!v->turning) {
-                float nextPos = v->animPos + speed * delta;
-                if (nextPos >= stopD) {
-                    printf("DL3 Vehicle %s starting turn to AL1\n", v->id);
-                    v->turning = true;
+            if (!v->turning && v->animPos >= stopD) {
+                printf("DL3 Vehicle %s starting turn to AL1\n", v->id);
+                v->turning = true;
+                v->turnProgress = 0.0f;
+                v->turnPosX = stopD;
+                v->turnPosY = WINDOW_HEIGHT/2 - LANE_WIDTH;
+            }
+
+            if (v->turning) {
+                float turnSpeed = 0.001f;
+                v->turnProgress += delta * turnSpeed * 0.75;
+                if (v->turnProgress > 1.0f)
+                    v->turnProgress = 1.0f;
+                
+                float t = easeInOutQuad(v->turnProgress);
+                float sX = stopD;
+                float sY = WINDOW_HEIGHT/2 - LANE_WIDTH;
+                float eX = WINDOW_WIDTH/2;
+                float eY = 0;
+                
+                // Adjust control points for smoother curve
+                float cX = (sX + eX) / 2;
+                float cY = sY - 100.0f;
+                
+                v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*eX;
+                v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*eY;
+                
+                if (v->turnProgress >= 1.0f) {
+                    v->lane = 'A';
+                    v->lane_number = 1;
+                    v->turning = false;
                     v->turnProgress = 0.0f;
-                    v->turnPosX = stopD;
-                    v->turnPosY = WINDOW_HEIGHT/2 - LANE_WIDTH;
-                } else {
-                    v->animPos = nextPos;
+                    v->animPos = 0;
+                    printf("DL3 Vehicle %s completed turn into AL1\n", v->id);
                 }
                 continue;
             }
-
-            // Execute turn with a smoother curve:
-            v->turnProgress += delta * TURN_SPEED;
-            if (v->turnProgress > 1.0f) v->turnProgress = 1.0f;
-            float t = easeInOutQuad(v->turnProgress);
-            // Define new turning curve parameters:
-            float startX = stopD;                          // start at DL3 turn point
-            float startY = WINDOW_HEIGHT/2 - LANE_WIDTH;
-            float finalX = WINDOW_WIDTH/2 - LANE_WIDTH/2;     // target x on AL1 (centered)
-            float finalY = stopA;                           // target y position on AL1
-            // Choose a control point halfway with an upward offset for smooth curvature:
-            float controlX = (startX + finalX) / 2.0f;
-            float controlY = startY - 50.0f;  // adjust 50.0f as needed to control curvature
-            calculateTurnCurve(t, startX, startY, controlX, controlY, finalX, finalY,
-                                 &v->turnPosX, &v->turnPosY);
-            if (v->turnProgress >= 1.0f) {
-                 v->lane = 'A';            // now in road A
-                 v->lane_number = 1;         // AL1 lane
-                 v->turning = false;
-                 v->turnProgress = 0.0f;
-                 // Set animPos so that the vehicle immediately continues along AL1
-                 v->animPos = finalY;
-                 printf("DL3 Vehicle %s completed turn into AL1\n", v->id);
-            }
-            continue;
         }
         
         if (v->lane == 'D' && v->lane_number == 2) {
@@ -1385,7 +1375,7 @@ void* processVehiclesSequentially(void* arg) {
                 default: free(newVehicle);
             }
         }
-        sleep(3); // Delay 3 seconds between vehicles
+        sleep(1); // Reduced from 3 to 1 second for more frequent spawns
     }
     for (size_t i = 0; i < count; i++) {
         free(lines[i]);

@@ -636,54 +636,49 @@ void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos) {
     // Lateral separation offset based on queue position
     int offset = (pos % 2 == 0) ? -10 : 10;
 
-    if(v->lane == 'A') {
-        // If turning, use the turning coordinates.
-        if(v->turning) {
-             x = (int)v->turnPosX;
-             y = (int)v->turnPosY;
-        } else {
-             int offsetX = (v->lane_number == 1) ? -LANE_WIDTH :
-                           (v->lane_number == 3) ? LANE_WIDTH : 0;
-             x = WINDOW_WIDTH/2 - w/2 + offsetX;
-             y = (int)v->animPos;
-        }
+    if (v->turning) {
+        // Use the turning coordinates if the vehicle is turning
+        x = (int)v->turnPosX;
+        y = (int)v->turnPosY;
     } else {
-        switch(v->lane) {
-            case 'A': {
-                // For vehicles from road A (north), adjust x-position based on lane_number.
-                int offsetX = (v->lane_number == 1) ? -LANE_WIDTH :
-                              (v->lane_number == 3) ? LANE_WIDTH : 0;
-                x = WINDOW_WIDTH/2 - w/2 + offsetX;
-                y = (int)v->animPos;
-                break;
-            }
-            case 'B': {
-                // For vehicles from road B, now the rightmost (ingoing) lane is lane_number==1
-                // and the leftmost (outgoing) lane is lane_number==3.
-                int offsetX = (v->lane_number == 1) ? LANE_WIDTH : (v->lane_number == 3) ? -LANE_WIDTH : 0;
-                x = WINDOW_WIDTH/2 - w/2 + offsetX;
-                y = (int)v->animPos;
-                break;
-            }
-            case 'C': {
-                // For vehicles from road C (east), adjust y-position based on lane_number.
-                int offsetY = (v->lane_number == 1) ? -LANE_WIDTH :
-                              (v->lane_number == 3) ? LANE_WIDTH : 0;
-                x = (int)v->animPos;
-                y = WINDOW_HEIGHT/2 - h/2 + offsetY;
-                break;
-            }
-            case 'D': {
-                // For vehicles from road D (west), adjust y-position based on lane_number.
-                int offsetY = (v->lane_number == 1) ? LANE_WIDTH :
-                              (v->lane_number == 3) ? -LANE_WIDTH : 0;
-                x = (int)v->animPos;
-                y = WINDOW_HEIGHT/2 - h/2 + offsetY;
-                break;
-            }
-            default: {
-                x = WINDOW_WIDTH/2 + 10;
-                y = (int)v->animPos;
+        if (v->lane == 'A') {
+            int offsetX = (v->lane_number == 1) ? -LANE_WIDTH :
+                          (v->lane_number == 3) ? LANE_WIDTH : 0;
+            x = WINDOW_WIDTH/2 - w/2 + offsetX;
+            y = (int)v->animPos;
+        } else {
+            switch (v->lane) {
+                case 'A': {
+                    int offsetX = (v->lane_number == 1) ? -LANE_WIDTH :
+                                  (v->lane_number == 3) ? LANE_WIDTH : 0;
+                    x = WINDOW_WIDTH/2 - w/2 + offsetX;
+                    y = (int)v->animPos;
+                    break;
+                }
+                case 'B': {
+                    int offsetX = (v->lane_number == 1) ? LANE_WIDTH : (v->lane_number == 3) ? -LANE_WIDTH : 0;
+                    x = WINDOW_WIDTH/2 - w/2 + offsetX;
+                    y = (int)v->animPos;
+                    break;
+                }
+                case 'C': {
+                    int offsetY = (v->lane_number == 1) ? -LANE_WIDTH :
+                                  (v->lane_number == 3) ? LANE_WIDTH : 0;
+                    x = (int)v->animPos;
+                    y = WINDOW_HEIGHT/2 - h/2 + offsetY;
+                    break;
+                }
+                case 'D': {
+                    int offsetY = (v->lane_number == 1) ? LANE_WIDTH :
+                                  (v->lane_number == 3) ? -LANE_WIDTH : 0;
+                    x = (int)v->animPos;
+                    y = WINDOW_HEIGHT/2 - h/2 + offsetY;
+                    break;
+                }
+                default: {
+                    x = WINDOW_WIDTH/2 + 10;
+                    y = (int)v->animPos;
+                }
             }
         }
     }
@@ -1027,25 +1022,24 @@ void updateVehicles(SharedData* sharedData) {
             
             if (v->turning) {
                 float turnSpeed = 0.001f;
-                v->turnProgress += delta * turnSpeed;
-                if (v->turnProgress > 1.0f) v->turnProgress = 1.0f;
-                
+                // Use same multiplier as AL2
+                v->turnProgress += delta * turnSpeed * 0.75;
+                if (v->turnProgress > 1.0f)
+                    v->turnProgress = 1.0f;
                 float sX = WINDOW_WIDTH/2, sY = stopB;
-                float cX = WINDOW_WIDTH/2 - 50.0f;
-                float targetX = WINDOW_WIDTH/2;
-                float targetY = stopA;
+                float cX = WINDOW_WIDTH/2 - 50.0f; // control point adjusted for BL2
+                float cY = stopB - ((stopB - stopA) / 2);
+                float eX = WINDOW_WIDTH/2, eY = stopA;
                 float t = v->turnProgress;
-                
-                v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*targetX;
-                v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*(sY - 50.0f) + t*t*targetY;
-                
+                v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*eX;
+                v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*eY;
                 if (v->turnProgress >= 1.0f) {
                     v->lane = 'A';
                     v->lane_number = 1;
                     v->turning = false;
                     v->turnProgress = 0.0f;
-                    v->animPos = targetY;
-                    printf("BL2 Vehicle %s completed turn into AL1.\n", v->id);
+                    v->animPos = eY;
+                    printf("BL2 Vehicle %s completed turn into AL1. Final pos: %f\n", v->id, eY);
                 }
                 continue;
             }
@@ -1161,18 +1155,17 @@ void updateVehicles(SharedData* sharedData) {
             
             if (v->turning) {
                 float turnSpeed = 0.001f;
-                v->turnProgress += delta * turnSpeed;
-                if (v->turnProgress > 1.0f) v->turnProgress = 1.0f;
-                
+                // Adjust progress as in AL2
+                v->turnProgress += delta * turnSpeed * 0.75;
+                if (v->turnProgress > 1.0f)
+                    v->turnProgress = 1.0f;
                 float sX = stopC, sY = WINDOW_HEIGHT/2;
-                float cX = sX - 50.0f;
+                float cX = sX - 50.0f; // control point for smooth curve
                 float targetX = stopD;
                 float targetY = WINDOW_HEIGHT/2 + LANE_WIDTH;
                 float t = v->turnProgress;
-                
                 v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*targetX;
                 v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*(sY + 50.0f) + t*t*targetY;
-                
                 if (v->turnProgress >= 1.0f) {
                     v->lane = 'D';
                     v->lane_number = 1;
@@ -1288,18 +1281,17 @@ void updateVehicles(SharedData* sharedData) {
             
             if (v->turning) {
                 float turnSpeed = 0.001f;
-                v->turnProgress += delta * turnSpeed;
-                if (v->turnProgress > 1.0f) v->turnProgress = 1.0f;
-                
+                // Consistent progress update as for AL2
+                v->turnProgress += delta * turnSpeed * 0.75;
+                if (v->turnProgress > 1.0f)
+                    v->turnProgress = 1.0f;
                 float sX = stopD, sY = WINDOW_HEIGHT/2;
-                float cX = sX + 50.0f;
+                float cX = sX + 50.0f; // control point adjusted for DL2
                 float targetX = stopC;
-                float targetY = WINDOW_HEIGHT/2 - LANE_WIDTH;
+                float targetY = WINDOW_WIDTH/2 - LANE_WIDTH;
                 float t = v->turnProgress;
-                
                 v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*targetX;
                 v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*(sY - 50.0f) + t*t*targetY;
-                
                 if (v->turnProgress >= 1.0f) {
                     v->lane = 'C';
                     v->lane_number = 1;

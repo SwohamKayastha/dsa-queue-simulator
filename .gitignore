@@ -5,8 +5,6 @@ SDL2.dll
 SDL2_ttf.dll
 /src/
 *.exe
-*.data
-vehicles.data
 *.o
 simulator
 traffic_generator

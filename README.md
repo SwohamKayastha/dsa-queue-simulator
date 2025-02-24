@@ -57,7 +57,7 @@ gcc simulator.c -o sim -Dmain=SDL_main -lmingw32 -lSDL2main -lSDL2 -lSDL2_ttf &&
 - 🚑 Emergency Vehicles: Red color (prefix 'EMG' in vehicle ID)
 Lane System
 ### Lane System
-![dsa-image](dsa-queue-simulator\dsa-img.png)
+![[dsa-image](dsa-queue-simulator\dsa-img.png)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/dsa-img.png)
 <!-- here implement the image -->
 ### Traffic Rules
 - 🟢 Green light: Vehicles proceed

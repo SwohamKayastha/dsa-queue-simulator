@@ -3,8 +3,7 @@
 A sophisticated traffic management system that simulates real-world junction behavior with multi-lane roads and smooth vehicle animations.
 
 ## 🎥 Demo
-[Link to demo video/GIF showing the simulation in action]
-![Traffic Simulator Demo](path_to_your_demo.gif)
+![[Traffic Simulator Demo](path_to_your_demo.gif)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/dsa.gif)
 
 ## ✨ Key Features
 

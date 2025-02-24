@@ -8,3 +8,4 @@ SDL2_ttf.dll
 *.o
 simulator
 traffic_generator
+dsa.mp4

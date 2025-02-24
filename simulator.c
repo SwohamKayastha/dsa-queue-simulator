@@ -557,17 +557,95 @@ void refreshLight(SDL_Renderer *renderer, SharedData* sharedData) {
     }
 }
 
+// Define the estimated time (in seconds) for one vehicle to pass.
+#define T_PASS_TIME 2
+// New helper: Count vehicles in a given queue with a specific lane number.
+int countVehicles(VehicleQueue* queue, int lane_num) {
+    int count = 0;
+    pthread_mutex_lock(&queue->lock);
+    for (int i = 0; i < queue->size; i++) {
+        int idx = (queue->front + i) % MAX_QUEUE_SIZE;
+        if (queue->vehicles[idx]->lane_number == lane_num)
+            count++;
+        }
+    pthread_mutex_unlock(&queue->lock);
+    return count;
+    }
+
+// New helper: Count all vehicles in Road A (queueA)
+int countVehiclesLaneA(VehicleQueue* queue) {
+    int count = 0;
+    pthread_mutex_lock(&queue->lock);
+    count = queue->size; // all vehicles in queueA are from Road A
+    pthread_mutex_unlock(&queue->lock);
+    return count;
+}
+// Modified chequeQueue to serve Road A with highest priority.
+
 void* chequeQueue(void* arg) {
     SharedData* sharedData = (SharedData*)arg;
     while (1) {
-        // All lights red
-        sharedData->nextLight = 0;
-        sleep(2);
-        // Cycle through each lane
-        for (int lane = 1; lane <= 4; lane++) {
-            sharedData->nextLight = lane;
-            sleep(3);
-        }
+        // Priority: Serve Road A if any vehicles waiting.
+        int countA = countVehiclesLaneA(queueA);
+            if (countA > 5) {
+                sharedData->nextLight = 1; // 1 corresponds to Road A.
+                sleep(3);  // Fixed green time for Road A priority.
+            } else {
+                // Normal lanes
+                // Check for priority condition first (>10 vehicles)
+                int priorityB = countVehicles(queueB, 2);
+                int priorityC = countVehicles(queueC, 2);
+                int priorityD = countVehicles(queueD, 2);
+
+                // Handle priority roads first
+                if (priorityB > 10) {
+                    sharedData->nextLight = 2; // B lane
+                    while (countVehicles(queueB, 2) > 5) {
+                        sleep(T_PASS_TIME);
+                    }
+                } else if (priorityC > 10) {
+                    sharedData->nextLight = 3; // C lane
+                    while (countVehicles(queueC, 2) > 5) {
+                        sleep(T_PASS_TIME);
+                    }
+                } else if (priorityD > 10) {
+                    sharedData->nextLight = 4; // D lane
+                    while (countVehicles(queueD, 2) > 5) {
+                        sleep(T_PASS_TIME);
+                    }
+                } else {
+                    // Normal operation when no priority condition
+                    int L1 = countVehicles(queueA, 2); // AL2
+                    int L2 = countVehicles(queueB, 2); // BL2
+                    int L3 = countVehicles(queueC, 2); // CL2
+                    int L4 = countVehicles(queueD, 2); // DL2
+                    
+                    // Calculate average vehicles waiting (V)
+                    float V = (float)(L1 + L2 + L3 +L4) / 3.0f;
+                    
+                    // Calculate green light duration
+                    int greenTime = (int)(V * T_PASS_TIME);
+                    if (greenTime < 1) greenTime = 1;
+                    
+                     // Serve each lane based on calculated time
+                    if (L1 > 0) {
+                        sharedData->nextLight = 1; // A lane
+                        sleep(greenTime);
+                    }
+                    if (L2 > 0) {
+                        sharedData->nextLight = 2; // B lane
+                        sleep(greenTime);
+                    }
+                    if (L3 > 0) {
+                        sharedData->nextLight = 3; // C lane
+                        sleep(greenTime);
+                    }
+                    if (L4 > 0) {
+                        sharedData->nextLight = 4; // D lane
+                        sleep(greenTime);
+                    }
+                }
+            }
     }
     return NULL;
 }

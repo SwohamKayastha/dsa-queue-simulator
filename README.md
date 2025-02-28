@@ -3,7 +3,13 @@
 A sophisticated traffic management system that simulates real-world junction behavior with multi-lane roads and smooth vehicle animations.
 
 ## 🎥 Demo
-!![[Traffic Simulator Demo](path_to_your_demo.gif)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/dsa-gif.gif)
+![[Traffic Simulator Demo](path_to_your_demo.gif)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/dsa-gif.gif)
+
+
+![[Traffic generator run](path_to_your_demo.gif)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/traffic-generator-run.mp4)
+
+
+![[Traffic simulator run](path_to_your_demo.gif)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/simulator-run.mp4)
 
 ## ✨ Key Features
 
@@ -130,6 +136,8 @@ cd dsa-queue-simulator
 ### Compile and run:
 ```bash
 gcc simulator.c -o sim -Dmain=SDL_main -lmingw32 -lSDL2main -lSDL2 -lSDL2_ttf && ./sim
+
+gcc traffic_generator.c -o traffic_gen && ./traffic_gen
 ```
 
 ## 🎮 Controls & Usage
@@ -144,11 +152,12 @@ gcc simulator.c -o sim -Dmain=SDL_main -lmingw32 -lSDL2main -lSDL2 -lSDL2_ttf &&
 - ↩️ Turning animations at intersections
 
 ### Traffic Monitor Indications
-| Color | Meaning | Action |
-|-------|---------|--------|
-| 🟢 Green | Road has right-of-way | Vehicles proceed through intersection |
-| 🔴 Red | Must stop | Vehicles stop at the stop line |
-| 🟠 Orange | Congestion warning | Indicates moderate traffic in UI |
+| Color | Meaning |
+|-------|---------|
+| 🟢 Green | Low congestion ( fewer than 1⁄3 of maximum vehicles) 
+| 🟠 Orange | Medium Congestion ( between 1⁄3 and 2⁄3 of maximum vehicles) 
+| 🔴 Red | High Congestion ( more than 2⁄3 of maximum vehicles) |
+
 
 ## 🛠️ Customization
 ### Modify Traffic Patterns

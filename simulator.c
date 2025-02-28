@@ -19,7 +19,7 @@ process the queue and visualize them*/
 #include <time.h>
 
 #define MAX_LINE_LENGTH 20
-#define MAIN_FONT "/usr/share/fonts/TTF/DejaVuSans.ttf"
+#define MAIN_FONT "DejaVuSans.ttf"
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 800
 #define SCALE 1.1
@@ -56,6 +56,8 @@ typedef struct {
     float turnProgress;     // new: progress value from 0.0 to 1.0 for a turn
     float turnPosX;         // New fields for turning animation positions (x and y)
     float turnPosY;
+    float angle;
+    float targetAngle;
 } Vehicle;
 
 // Queue structure
@@ -144,10 +146,15 @@ void cleanupQueue(VehicleQueue* queue) {
     free(queue);
 }
 
+// Function to get queue size
+int getQueueSize(VehicleQueue *queue) {
+    return queue->size;
+}
+
 // Function declarations
 bool initializeSDL(SDL_Window **window, SDL_Renderer **renderer);
 void drawRoadsAndLane(SDL_Renderer *renderer, TTF_Font *font);
-void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int y);
+void displayText(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y);
 void drawLightForB(SDL_Renderer* renderer, bool isRed);
 void drawLightForA(SDL_Renderer* renderer, bool isRed);
 void drawLightForC(SDL_Renderer* renderer, bool isRed);
@@ -160,9 +167,11 @@ void drawVehiclesFromQueue(SDL_Renderer *renderer, TTF_Font *font, VehicleQueue 
 void drawVehicles(SDL_Renderer *renderer, TTF_Font *font);
 void updateVehicles(SharedData* sharedData);
 void* processVehiclesSequentially(void* arg);
+void drawUI(SDL_Renderer *renderer, SharedData* sharedData);
+void drawLaneCongestion(SDL_Renderer *renderer, int x, int y, int numVehicles, char lane);
+void rotateVehicle(Vehicle* vehicle, Uint32 delta);
 
 void printMessageHelper(const char* message, int count) {
-    for (int i = 0; i < count; i++) printf("%s\n", message);
     for (int i = 0; i < count; i++) printf("%s\n", message);
 }
 
@@ -210,6 +219,7 @@ int main(int argc, char* argv[]) {
         drawRoadsAndLane(renderer, font);
         refreshLight(renderer, &sharedData);
         drawVehicles(renderer, font);
+        drawUI(renderer, &sharedData);
         SDL_RenderPresent(renderer);
         SDL_Delay(16); // ~60 FPS
     }
@@ -222,7 +232,9 @@ int main(int argc, char* argv[]) {
     cleanupQueue(queueC);
     cleanupQueue(queueD);
     // pthread_kil
-    SDL_Quit();
+    // Terminate threads before exiting
+    pthread_kill(tQueue, SIGTERM);
+    pthread_kill(tReadFile, SIGTERM);
     return 0;
 }
 
@@ -301,114 +313,213 @@ void drawArrwow(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, int x3, 
     }
 }
 
+#define MAX_VEHICLES 10
+// Function to draw the lane congestion view (progress bars)
+void drawLaneCongestion(SDL_Renderer *renderer, int x, int y, int numVehicles, char lane) {
+    int barWidth = 180, barHeight = 24;
+    
+    // Background
+    SDL_Rect background = {x, y, barWidth, barHeight};
+    SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
+    SDL_RenderFillRect(renderer, &background);
+    
+    // Border
+    SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
+    SDL_RenderDrawRect(renderer, &background);
+
+    // Fill based on congestion level
+    if (numVehicles > 0) {
+        // Change color based on congestion level
+        if (numVehicles < MAX_VEHICLES/3) {
+            SDL_SetRenderDrawColor(renderer, 50, 200, 50, 255);  // Green for low congestion
+        } else if (numVehicles < 2*MAX_VEHICLES/3) {
+            SDL_SetRenderDrawColor(renderer, 255, 165, 0, 255);  // Orange for medium congestion
+        } else {
+            SDL_SetRenderDrawColor(renderer, 255, 50, 50, 255);  // Red for high congestion
+        }
+        
+        int fillWidth = (barWidth * numVehicles) / MAX_VEHICLES;
+        SDL_Rect fill = {x, y, fillWidth, barHeight};
+        SDL_RenderFillRect(renderer, &fill);
+    }
+    
+    // Draw markers for thresholds
+    SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
+    SDL_RenderDrawLine(renderer, x + barWidth/3, y, x + barWidth/3, y + barHeight);
+    SDL_RenderDrawLine(renderer, x + 2*barWidth/3, y, x + 2*barWidth/3, y + barHeight);
+    
+    // Label for the lane
+    char label[20];
+    sprintf(label, "Lane %c: %d", lane, numVehicles);
+    // Note: displayText implementation is assumed from the existing code
+}
+
+// Updated draw function to include lane congestion visualization and traffic statistics
+void drawUI(SDL_Renderer *renderer, SharedData *sharedData) {
+    TTF_Font* smallFont = TTF_OpenFont(MAIN_FONT, 16);
+    SDL_SetRenderDrawColor(renderer, 240, 240, 240, 200);
+    
+    // UI background panel
+    SDL_Rect uiPanel = {20, 20, 200, 200};
+    SDL_SetRenderDrawColor(renderer, 240, 240, 240, 220);
+    SDL_RenderFillRect(renderer, &uiPanel);
+    SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
+    SDL_RenderDrawRect(renderer, &uiPanel);
+    
+    // Display title
+    SDL_Rect titleRect = {30, 25, 180, 25};
+    SDL_SetRenderDrawColor(renderer, 50, 50, 100, 255);
+    SDL_RenderFillRect(renderer, &titleRect);
+    
+    // Get queue sizes
+    int queueA_size = getQueueSize(queueA);
+    int queueB_size = getQueueSize(queueB);
+    int queueC_size = getQueueSize(queueC);
+    int queueD_size = getQueueSize(queueD);
+    
+    // Calculate total and average
+    int totalVehicles = queueA_size + queueB_size + queueC_size + queueD_size;
+    float avgWaitingTime = 0; // This would require tracking entry/exit times
+    
+    // Draw congestion bars
+    drawLaneCongestion(renderer, 30, 60, queueA_size, 'A');
+    drawLaneCongestion(renderer, 30, 90, queueB_size, 'B');
+    drawLaneCongestion(renderer, 30, 120, queueC_size, 'C');
+    drawLaneCongestion(renderer, 30, 150, queueD_size, 'D');
+    
+    // Text labels using the existing displayText function
+    if (smallFont) {
+        displayText(renderer, smallFont, "Traffic Monitor", 40, 30);
+        
+        char statsText[50];
+        sprintf(statsText, "Total: %d vehicles", totalVehicles);
+        displayText(renderer, smallFont, statsText, 30, 180);
+        
+        // Display current active lane
+        char activeLaneText[20];
+        if (sharedData->currentLight == 1)
+            sprintf(activeLaneText, "Active: Lane A");
+        else if (sharedData->currentLight == 2)
+            sprintf(activeLaneText, "Active: Lane B");
+        else if (sharedData->currentLight == 3)
+            sprintf(activeLaneText, "Active: Lane C");
+        else if (sharedData->currentLight == 4)
+            sprintf(activeLaneText, "Active: Lane D");
+        else
+            sprintf(activeLaneText, "Active: None");
+        // This would need to be set based on the current traffic light state
+        displayText(renderer, smallFont, activeLaneText, 30, 200);
+        
+        TTF_CloseFont(smallFont);
+    }
+    
+    // Draw real-time traffic flow indicator
+    int flowIndicatorX = 650;
+    int flowIndicatorY = 30;
+    int flowIndicatorSize = 40;
+    
+    // Traffic flow circular indicator
+    SDL_Rect flowRect = {flowIndicatorX, flowIndicatorY, flowIndicatorSize, flowIndicatorSize};
+    
+    // Color based on overall traffic condition
+    if (totalVehicles < MAX_VEHICLES) {
+        SDL_SetRenderDrawColor(renderer, 50, 200, 50, 255); // Green - good flow
+    } else if (totalVehicles < 2*MAX_VEHICLES) {
+        SDL_SetRenderDrawColor(renderer, 255, 165, 0, 255); // Orange - moderate congestion
+    } else {
+        SDL_SetRenderDrawColor(renderer, 255, 50, 50, 255); // Red - heavy congestion
+    }
+    
+    // // Draw filled circle (approximated with multiple rectangles)
+    // for (int i = 0; i < flowIndicatorSize; i++) {
+    //     int arcHeight = sqrt(flowIndicatorSize*flowIndicatorSize - (i-flowIndicatorSize/2)*(i-flowIndicatorSize/2));
+    //     SDL_Rect arcRect = {
+    //         flowIndicatorX + i, 
+    //         flowIndicatorY + flowIndicatorSize/2 - arcHeight/2, 
+    //         1, 
+    //         arcHeight
+    //     };
+    //     SDL_RenderFillRect(renderer, &arcRect);
+    // }
+    
+    // Update the renderer
+    SDL_RenderPresent(renderer);
+}
 
 void drawRoadsAndLane(SDL_Renderer *renderer, TTF_Font *font) {
-    // Draw intersection roads (dark gray)
-    SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
+    // Clear background with light color
+    SDL_SetRenderDrawColor(renderer, 240, 240, 230, 255);
+    SDL_Rect backgroundRect = {0, 0, WINDOW_WIDTH, WINDOW_HEIGHT};
+    SDL_RenderFillRect(renderer, &backgroundRect);
+    
+    // Draw road surface
+    SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
+    
+    // Vertical road
     SDL_Rect vRoad = {WINDOW_WIDTH/2 - ROAD_WIDTH/2, 0, ROAD_WIDTH, WINDOW_HEIGHT};
     SDL_RenderFillRect(renderer, &vRoad);
+    
+    // Horizontal road
     SDL_Rect hRoad = {0, WINDOW_HEIGHT/2 - ROAD_WIDTH/2, WINDOW_WIDTH, ROAD_WIDTH};
     SDL_RenderFillRect(renderer, &hRoad);
-
-    // dashed lane markings inside the intersection
+    
+    // Draw lane markings
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    int dashLength = 15, gapLength = 10;
-    for (int i = 0; i <= 3; i++) {
+    
+    // Draw lanes for vertical roads (A and B)
+    for (int i = 1; i < 3; i++) {
         int x = WINDOW_WIDTH/2 - ROAD_WIDTH/2 + i * LANE_WIDTH;
-        for (int y = WINDOW_HEIGHT/2 - ROAD_WIDTH/2; y < WINDOW_HEIGHT/2 + ROAD_WIDTH/2; y += dashLength + gapLength)
-            SDL_RenderDrawLine(renderer, x, y, x, y + dashLength);
+        
+        // North of intersection
+        for (int y = 20; y < WINDOW_HEIGHT/2 - ROAD_WIDTH/2; y += 30) {
+            SDL_Rect dash = {x-1, y, 2, 15};
+            SDL_RenderFillRect(renderer, &dash);
+        }
+        
+        // South of intersection
+        for (int y = WINDOW_HEIGHT/2 + ROAD_WIDTH/2; y < WINDOW_HEIGHT - 20; y += 30) {
+            SDL_Rect dash = {x-1, y, 2, 15};
+            SDL_RenderFillRect(renderer, &dash);
+        }
     }
-    for (int i = 0; i <= 3; i++) {
+    
+    // Draw lanes for horizontal roads (C and D)
+    for (int i = 1; i < 3; i++) {
         int y = WINDOW_HEIGHT/2 - ROAD_WIDTH/2 + i * LANE_WIDTH;
-        for (int x = WINDOW_WIDTH/2 - ROAD_WIDTH/2; x < WINDOW_WIDTH/2 + ROAD_WIDTH/2; x += dashLength + gapLength)
-            SDL_RenderDrawLine(renderer, x, y, x + dashLength, y);
-    }
-
-    // extended roads arms
-
-    // road A (north): extended area from y = 0 to top of intersection.
-    int roadA_x = WINDOW_WIDTH/2 - ROAD_WIDTH/2;
-    int roadA_yStart = 0, roadA_yEnd = WINDOW_HEIGHT/2 - ROAD_WIDTH/2;
-    int laneWidthAB = ROAD_WIDTH / 3;
-    // draw vertical dividing lines inside road A.
-    for (int i = 1; i < 3; i++) {
-         int x = roadA_x + i * laneWidthAB;
-         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-         SDL_RenderDrawLine(renderer, x, roadA_yStart, x, roadA_yEnd);
-    }
-    // road B (south): extended area from bottom of intersection to window bottom.
-    int roadB_x = WINDOW_WIDTH/2 - ROAD_WIDTH/2;
-    int roadB_yStart = WINDOW_HEIGHT/2 + ROAD_WIDTH/2, roadB_yEnd = WINDOW_HEIGHT;
-    for (int i = 1; i < 3; i++) {
-         int x = roadB_x + i * laneWidthAB;
-         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-         SDL_RenderDrawLine(renderer, x, roadB_yStart, x, roadB_yEnd);
-    }
-
-    // road C (east): extended area from x = WINDOW_WIDTH/2 + ROAD_WIDTH/2 to WINDOW_WIDTH.
-    int roadC_y = WINDOW_HEIGHT/2 - ROAD_WIDTH/2;
-    int roadC_xStart = WINDOW_WIDTH/2 + ROAD_WIDTH/2, roadC_xEnd = WINDOW_WIDTH;
-    int laneHeightCD = ROAD_WIDTH / 3;
-    // Draw horizontal dividing lines for road C.
-    for (int i = 1; i < 3; i++) {
-         int y = roadC_y + i * laneHeightCD;
-         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-         SDL_RenderDrawLine(renderer, roadC_xStart, y, roadC_xEnd, y);
-    }
-    // road D (west): extended area from x = 0 to WINDOW_WIDTH/2 - ROAD_WIDTH/2.
-    int roadD_y = WINDOW_HEIGHT/2 - ROAD_WIDTH/2;
-    int roadD_xStart = 0, roadD_xEnd = WINDOW_WIDTH/2 - ROAD_WIDTH/2;
-    for (int i = 1; i < 3; i++) {
-         int y = roadD_y + i * laneHeightCD;
-         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-         SDL_RenderDrawLine(renderer, roadD_xStart, y, roadD_xEnd, y);
+        
+        // West of intersection
+        for (int x = 20; x < WINDOW_WIDTH/2 - ROAD_WIDTH/2; x += 30) {
+            SDL_Rect dash = {x, y-1, 15, 2};
+            SDL_RenderFillRect(renderer, &dash);
+        }
+        
+        // East of intersection
+        for (int x = WINDOW_WIDTH/2 + ROAD_WIDTH/2; x < WINDOW_WIDTH - 20; x += 30) {
+            SDL_Rect dash = {x, y-1, 15, 2};
+            SDL_RenderFillRect(renderer, &dash);
+        }
     }
     
-    // Road A labels:
-    int roadA_centerX = WINDOW_WIDTH/2;
-    int laneHeightA = roadA_yEnd - roadA_yStart;
-    for (int i = 0; i < 3; i++) {
-         char label[4];
-         sprintf(label, "A%d", i+1);
-         int labelY = roadA_yStart + (i * laneHeightA + laneHeightA/2);
-         displayText(renderer, font, label, roadA_centerX, labelY);
-    }
-    // Road B labels:
-    int roadB_centerX = WINDOW_WIDTH/2;
-    int laneHeightB = roadB_yEnd - roadB_yStart;
-    for (int i = 0; i < 3; i++) {
-         char label[4];
-         sprintf(label, "B%d", i+1);
-         int labelY = roadB_yStart + (i * laneHeightB + laneHeightB/2);
-         displayText(renderer, font, label, roadB_centerX, labelY);
-    }
-    // Road C labels (east)
-    int roadC_centerY = WINDOW_HEIGHT/2;
-    int laneWidthC = ROAD_WIDTH / 3;
-    int roadC_centerX = roadC_xStart + laneWidthC/2;
-    for (int i = 0; i < 3; i++) {
-         char label[4];
-         sprintf(label, "C%d", i+1);
-         int labelX = roadC_xStart + (i * laneWidthC + laneWidthC/2);
-         displayText(renderer, font, label, labelX, roadC_centerY);
-    }
-    // Road D labels (west)
-    int roadD_centerY = WINDOW_HEIGHT/2;
-    int laneWidthD = ROAD_WIDTH / 3;
-    int roadD_centerX = roadD_xEnd - laneWidthD/2;
-    for (int i = 0; i < 3; i++) {
-         char label[4];
-         sprintf(label, "D%d", i+1);
-         int labelX = roadD_xStart + (i * laneWidthD + laneWidthD/2);
-         displayText(renderer, font, label, labelX, roadD_centerY);
-    }
-    
-    // Intersection direction labels
+    // Simple road labels
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    
+    // Label backgrounds
+    SDL_Rect labelA = {WINDOW_WIDTH/2 - 15, 10, 30, 30};
+    SDL_Rect labelB = {WINDOW_WIDTH/2 - 15, WINDOW_HEIGHT - 40, 30, 30};
+    SDL_Rect labelC = {WINDOW_WIDTH - 40, WINDOW_HEIGHT/2 - 15, 30, 30};
+    SDL_Rect labelD = {10, WINDOW_HEIGHT/2 - 15, 30, 30};
+    
+    // SDL_RenderFillRect(renderer, &labelA);
+    // SDL_RenderFillRect(renderer, &labelB);
+    // SDL_RenderFillRect(renderer, &labelC);
+    // SDL_RenderFillRect(renderer, &labelD);
+    
+    // White text
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     displayText(renderer, font, "A", WINDOW_WIDTH/2, 10);
     displayText(renderer, font, "B", WINDOW_WIDTH/2, WINDOW_HEIGHT - 30);
-    displayText(renderer, font, "D", 10, WINDOW_HEIGHT/2);
     displayText(renderer, font, "C", WINDOW_WIDTH - 30, WINDOW_HEIGHT/2);
+    displayText(renderer, font, "D", 10, WINDOW_HEIGHT/2);
 }
 
 void drawLightForA(SDL_Renderer* renderer, bool isRed) {
@@ -500,19 +611,41 @@ void drawLightForD(SDL_Renderer* renderer, bool isRed) {
     SDL_RenderFillRect(renderer, &middle_Light);
 }
 
-void displayText(SDL_Renderer *renderer, TTF_Font *font, char *text, int x, int y){
-    // display necessary text
+typedef struct {
+    char text[MAX_LINE_LENGTH];
+    SDL_Texture *texture;
+} TextCache;
+
+TextCache textCache[MAX_QUEUE_SIZE];
+int textCacheSize = 0;
+
+SDL_Texture* getCachedTexture(SDL_Renderer *renderer, TTF_Font *font, const char *text) {
+    for (int i = 0; i < textCacheSize; i++) {
+        if (strcmp(textCache[i].text, text) == 0) {
+            return textCache[i].texture;
+        }
+    }
+
     SDL_Color textColor = {0, 0, 0, 255}; // black color
     SDL_Surface *textSurface = TTF_RenderText_Solid(font, text, textColor);
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, textSurface);
     SDL_FreeSurface(textSurface);
-    SDL_Rect textRect = {x,y,0,0 };
+
+    if (textCacheSize < MAX_QUEUE_SIZE) {
+        strncpy(textCache[textCacheSize].text, text, MAX_LINE_LENGTH - 1);
+        textCache[textCacheSize].text[MAX_LINE_LENGTH - 1] = '\0';
+        textCache[textCacheSize].texture = texture;
+        textCacheSize++;
+    }
+
+    return texture;
+}
+
+void displayText(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y) {
+    SDL_Texture *texture = getCachedTexture(renderer, font, text);
+    SDL_Rect textRect = {x, y, 0, 0};
     SDL_QueryTexture(texture, NULL, NULL, &textRect.w, &textRect.h);
-    // SDL_Log("DIM of SDL_Rect %d %d %d %d", textRect.x, textRect.y, textRect.h, textRect.w);
-    // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    // SDL_Log("TTF_Error: %s\n", TTF_GetError());
     SDL_RenderCopy(renderer, texture, NULL, &textRect);
-    // SDL_Log("TTF_Error: %s\n", TTF_GetError());
 }
 
 
@@ -621,7 +754,7 @@ void* chequeQueue(void* arg) {
                     int L4 = countVehicles(queueD, 2); // DL2
                     
                     // Calculate average vehicles waiting (V)
-                    float V = (float)(L1 + L2 + L3 +L4) / 3.0f;
+                    float V = (float)(L1 + L2 + L3 +L4) / 4.0f;
                     
                     // Calculate green light duration
                     int greenTime = (int)(V * T_PASS_TIME);
@@ -719,12 +852,6 @@ void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos) {
         x = (int)v->turnPosX;
         y = (int)v->turnPosY;
     } else {
-        if (v->lane == 'A') {
-            int offsetX = (v->lane_number == 1) ? -LANE_WIDTH :
-                          (v->lane_number == 3) ? LANE_WIDTH : 0;
-            x = WINDOW_WIDTH/2 - w/2 + offsetX;
-            y = (int)v->animPos;
-        } else {
             switch (v->lane) {
                 case 'A': {
                     int offsetX = (v->lane_number == 1) ? -LANE_WIDTH :
@@ -758,20 +885,52 @@ void drawVehicle(SDL_Renderer *renderer, TTF_Font *font, Vehicle *v, int pos) {
                     y = (int)v->animPos;
                 }
             }
-        }
     }
     
     if(v->isEmergency)
         SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
     else
         SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
-    SDL_Rect rect = { x, y, w, h };
-    SDL_RenderFillRect(renderer, &rect);
+
+    // Create the vehicle rectangle
+    SDL_Rect vehicleRect = { x, y, w, h };
     
-    char idLabel[MAX_VEHICLE_ID];
-    strncpy(idLabel, v->id, MAX_VEHICLE_ID);
-    idLabel[MAX_VEHICLE_ID-1] = '\0';
-    displayText(renderer, font, idLabel, x, y - h - 2);
+    // If vehicle is rotating, use SDL's rotation capabilities
+    if (v->turning && fabs(v->angle) > 0.1f) {
+        // Create a texture for the rotated vehicle
+        SDL_Surface* vehicleSurface = SDL_CreateRGBSurface(0, w, h, 32, 0, 0, 0, 0);
+        if (vehicleSurface) {
+            // Fill the surface with the vehicle color
+            SDL_FillRect(vehicleSurface, NULL, 
+                         v->isEmergency ? SDL_MapRGB(vehicleSurface->format, 255, 0, 0) 
+                                       : SDL_MapRGB(vehicleSurface->format, 0, 0, 255));
+            
+            // Create texture from surface
+            SDL_Texture* vehicleTexture = SDL_CreateTextureFromSurface(renderer, vehicleSurface);
+            if (vehicleTexture) {
+                // Define destination rectangle
+                SDL_Rect dstRect = { x - w/2, y - h/2, w, h };
+                
+                // Render the rotated vehicle
+                SDL_RenderCopyEx(renderer, vehicleTexture, NULL, &dstRect, 
+                                v->angle, NULL, SDL_FLIP_NONE);
+                
+                // Clean up
+                SDL_DestroyTexture(vehicleTexture);
+            }
+            SDL_FreeSurface(vehicleSurface);
+        }
+    } else {
+        // Draw normally for non-rotating vehicles
+        SDL_RenderFillRect(renderer, &vehicleRect);
+    }
+    // SDL_Rect rect = { x, y, w, h };
+    // SDL_RenderFillRect(renderer, &rect);
+    
+    // char idLabel[MAX_VEHICLE_ID];
+    // strncpy(idLabel, v->id, MAX_VEHICLE_ID);
+    // idLabel[MAX_VEHICLE_ID-1] = '\0';
+    // // displayText(renderer, font, idLabel, x, y - h - 2);
 }
 
 // drawing vehicles from a given queue.
@@ -830,6 +989,12 @@ void updateVehicles(SharedData* sharedData) {
         lastTime = currentTime;
     Uint32 delta = currentTime - lastTime;
     lastTime = currentTime;
+
+    // Define stop positions for each lane
+    const int stopA = WINDOW_HEIGHT/2 - ROAD_WIDTH/2 - 20;
+    const int stopB = WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20;
+    const int stopC = WINDOW_WIDTH/2 + ROAD_WIDTH/2 + 20;
+    const int stopD = WINDOW_WIDTH/2 - ROAD_WIDTH/2 - 20;
     
     char activeLane = '\0';
     if (sharedData->currentLight == 1) activeLane = 'A';
@@ -837,10 +1002,6 @@ void updateVehicles(SharedData* sharedData) {
     else if (sharedData->currentLight == 3) activeLane = 'C';
     else if (sharedData->currentLight == 4) activeLane = 'D';
 
-    int stopA = WINDOW_HEIGHT/2 - ROAD_WIDTH/2 - 20;
-    int stopB = WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20;
-    int stopC = WINDOW_WIDTH/2 + ROAD_WIDTH/2 + 20;
-    int stopD = WINDOW_WIDTH/2 - ROAD_WIDTH/2 - 20;
 
     // Lane A (north to south)
     pthread_mutex_lock(&queueA->lock);
@@ -848,20 +1009,70 @@ void updateVehicles(SharedData* sharedData) {
         int idx = (queueA->front + i) % MAX_QUEUE_SIZE;
         Vehicle *v = queueA->vehicles[idx];
         
-        // New turning logic for vehicles from AL3 (rightmost lane)
-        if (v->lane == 'A' && v->lane_number == 3) {
-            // Debug: vehicle moving in AL3
-            printf("Vehicle %s is in AL3, animPos: %f\n", v->id, v->animPos);
+        // Check if this is a vehicle that recently completed a turn from DL3 to AL1
+        if (v->lane == 'A' && v->lane_number == 1 && v->animPos > 0 && v->animPos <= stopA) {
+            // This is likely a vehicle that came from DL3
+            // Continue moving it upward (negative direction for A lane)
+            float nextPos = v->animPos - speed * delta * 1.5; // Move slightly faster
+            v->animPos = nextPos;
             
-            // Begin turning upon reaching threshold
+            if ((int)v->animPos % 50 == 0) {
+                printf("[POST-TURN] DL3->AL1 Vehicle %s moving upward at pos %.1f\n", 
+                       v->id, v->animPos);
+            }
+            
+            // If it reaches the top of the screen, it will be dequeued below
+            continue; // Skip other movement logic for this vehicle
+        }
+        
+        // Define vehicle gap and speed multipliers for all lanes
+        float a_l3_vehicle_gap = VEHICLE_GAP * 0.7; // 30% smaller gap for lane A
+        float a_l2_vehicle_gap = VEHICLE_GAP * 1.5; // 50% larger gap for lane A
+        float a_l3_speed_multiplier = 1.3;         // 30% faster for lane A
+        float a_l2_speed_multiplier = 0.85;        // 15% slower for lane A
+
+        float b_l3_vehicle_gap = VEHICLE_GAP * 0.7; // 30% smaller gap for lane B
+        float b_l2_vehicle_gap = VEHICLE_GAP * 1.5; // 50% larger gap for lane B
+        float b_l3_speed_multiplier = 1.3;         // 30% faster for lane B
+        float b_l2_speed_multiplier = 0.85;        // 15% slower for lane B
+
+        float c_l3_vehicle_gap = VEHICLE_GAP * 0.7; // 30% smaller gap for lane C
+        float c_l2_vehicle_gap = VEHICLE_GAP * 1.5; // 50% larger gap for lane C
+        float c_l3_speed_multiplier = 1.3;         // 30% faster for lane C
+        float c_l2_speed_multiplier = 0.85;        // 15% slower for lane C
+
+        float d_l3_vehicle_gap = VEHICLE_GAP * 0.7; // 30% smaller gap for lane D
+        float d_l2_vehicle_gap = VEHICLE_GAP * 1.5; // 50% larger gap for lane D
+        float d_l3_speed_multiplier = 1.3;         // 30% faster for lane D
+        float d_l2_speed_multiplier = 0.85;        // 15% slower for lane D
+
+        // VEHICLE GROUP 1: Rightmost lane (AL3) vehicles turning to road C
+        if (v->lane == 'A' && v->lane_number == 3) {
+            // L3 vehicles use reduced spacing (they can be closer to each other)
+            float l3_vehicle_gap = a_l3_vehicle_gap; // 30% smaller gap
+            
+            // Check for vehicle ahead with reduced spacing
+            if (i > 0) {
+                int prevIdx = (queueA->front + i - 1) % MAX_QUEUE_SIZE;
+                Vehicle *ahead = queueA->vehicles[prevIdx];
+                if (ahead->lane == v->lane && ahead->lane_number == v->lane_number &&
+                    !ahead->turning) { // Only check spacing for non-turning vehicles
+                    if (v->animPos + VEHICLE_LENGTH + l3_vehicle_gap > ahead->animPos) {
+                        v->animPos = ahead->animPos - VEHICLE_LENGTH - l3_vehicle_gap;
+                    }
+                }
+            }
+            
+            // Begin turning upon reaching threshold - independent from other lanes
             if (!v->turning && v->animPos >= (WINDOW_HEIGHT/2 - ROAD_WIDTH/2 - 20)) {
-                printf("Vehicle %s reached turning threshold. Starting turn.\n", v->id);
+                printf("Vehicle %s (AL3) reached turning threshold. Starting turn.\n", v->id);
                 v->turning = true;
                 v->turnProgress = 0.0f;
                 // Use the vehicle's current position as turning start.
                 v->turnPosX = WINDOW_WIDTH/2 + LANE_WIDTH; // initial x for rightmost lane
                 v->turnPosY = v->animPos;                  // current vertical position
             }
+            
             if (v->turning) {
                 float turnSpeed = 0.001f;
                 v->turnProgress += delta * turnSpeed;
@@ -881,11 +1092,11 @@ void updateVehicles(SharedData* sharedData) {
                 // Compute quadratic Bezier: B(t)= (1-t)^2 * start + 2(1-t)t * control + t^2 * end.
                 v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*targetX;
                 v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*eY;
-                // Do not update v->animPos here; it remains for spacing logic.
+                
                 if (v->turnProgress >= 1.0f) {
                     // Turn is complete: update lane and reset flags.
                     v->lane = 'C';          // Transition to road C.
-                    v->lane_number = 1;       // Set as incoming lane for road C.
+                    v->lane_number = 1;     // Set as incoming lane for road C.
                     v->turning = false;
                     v->turnProgress = 0.0f;
                     // Set animPos to the final x-position on road C.
@@ -895,69 +1106,41 @@ void updateVehicles(SharedData* sharedData) {
                 // Draw using computed turning coordinates (handled in drawVehicle).
                 continue;
             }
+            
+            // L3 vehicles move faster when not turning
+            float l3_speed_multiplier = a_l3_speed_multiplier; // 30% faster
+            float nextPos = v->animPos + speed * delta * l3_speed_multiplier;
+            v->animPos = nextPos;
+            continue; // Skip regular movement logic
         }
-         
-        // ...inside the road A processing loop, before the regular movement logic, add:
-
-        // if (v->lane == 'A' && v->lane_number == 3) {
-        //     // L3 vehicles bypass traffic signals—always move forward.
-        //     v->animPos += speed * delta;
-        //     // When the vehicle reaches the turning threshold, begin turn immediately.
-        //     if (!v->turning && v->animPos >= (WINDOW_HEIGHT/2 - ROAD_WIDTH/2 - 20)) {
-        //          printf("AL3 Vehicle %s reached threshold. Starting turn to road C.\n", v->id);
-        //          v->turning = true;
-        //          v->turnProgress = 0.0f;
-        //          // Save current position as turn start.
-        //          v->turnPosX = WINDOW_WIDTH/2 + LANE_WIDTH; // initial x for right lane
-        //          v->turnPosY = v->animPos;                  // current y position
-        //     }
-        //     if (v->turning) {
-        //          float turnSpeed = 0.001f;
-        //          v->turnProgress += delta * turnSpeed;
-        //          if (v->turnProgress > 1.0f)
-        //               v->turnProgress = 1.0f;
-        //          // Compute Bezier curve using the saved start position.
-        //          float sX = v->turnPosX;
-        //          float sY = v->turnPosY;
-        //          float cX = sX + 50.0f; // adjust control offset as needed
-        //          float targetX = (WINDOW_WIDTH/2 + ROAD_WIDTH/2) + (ROAD_WIDTH/6);
-        //          float eY = WINDOW_HEIGHT/2 - 5; // target y on road C
-        //          float cY = sY + (eY - sY) / 2;
-        //          float t = v->turnProgress;
-        //          v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*targetX;
-        //          v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*eY;
-        //          if (v->turnProgress >= 1.0f) {
-        //               v->lane = 'C';
-        //               v->lane_number = 1;
-        //               v->turning = false;
-        //               v->turnProgress = 0.0f;
-        //               v->animPos = targetX; // update animPos for road C motion
-        //               printf("AL3 Vehicle %s completed turn into road C.\n", v->id);
-        //          }
-        //          continue; // Skip further movement processing for this vehicle.
-        //     }
-        //     continue; // L3 vehicles processed here.
-        // }
         
-        // when lane_number - 2, the vehicle is in the middle lane.
+        // VEHICLE GROUP 2: Middle lane (AL2) vehicles turning to BL1
         if (v->lane == 'A' && v->lane_number == 2) {
+            // L2 vehicles have larger spacing requirements
+            float l2_vehicle_gap = a_l2_vehicle_gap; // 50% larger gap
+            
             if (activeLane != 'A') {
-                 float nextPos = v->animPos + speed * delta;
-                 // Check for vehicle ahead in the same queue
-                 if (i > 0) {
-                      int prevIdx = (queueA->front + i - 1) % MAX_QUEUE_SIZE;
-                      Vehicle *ahead = queueA->vehicles[prevIdx];
-                      if (nextPos + VEHICLE_LENGTH + VEHICLE_GAP > ahead->animPos)
-                           nextPos = ahead->animPos - VEHICLE_LENGTH - VEHICLE_GAP;
-                 }
-                 // ensure we don't exceed stopA.
-                 if (nextPos > stopA)
-                      v->animPos = stopA;
-                 else
-                      v->animPos = nextPos;
-                 continue;
+                float nextPos = v->animPos + speed * delta;
+                // Check for vehicle ahead with increased spacing
+                if (i > 0) {
+                    int prevIdx = (queueA->front + i - 1) % MAX_QUEUE_SIZE;
+                    Vehicle *ahead = queueA->vehicles[prevIdx];
+                    // Only check spacing for vehicles in same lane and not turning
+                    if (ahead->lane == v->lane && ahead->lane_number == v->lane_number &&
+                        !ahead->turning) {
+                        if (nextPos + VEHICLE_LENGTH + l2_vehicle_gap > ahead->animPos)
+                            nextPos = ahead->animPos - VEHICLE_LENGTH - l2_vehicle_gap;
+                    }
+                }
+                // ensure we don't exceed stopA.
+                if (nextPos > stopA)
+                    v->animPos = stopA;
+                else
+                    v->animPos = nextPos;
+                continue;
             }
-            // When light is green, begin turning from AL2 to BL1 (spacing not needed during turn).
+            
+            // When light is green, begin turning from AL2 to BL1 - independent of AL3
             if (!v->turning && v->animPos >= stopA) {
                  printf("Vehicle %s from AL2 reached stop position. Starting turn to BL1.\n", v->id);
                  v->turning = true;
@@ -966,6 +1149,7 @@ void updateVehicles(SharedData* sharedData) {
                  v->turnPosX = WINDOW_WIDTH/2;       // for middle lane, x center of road A
                  v->turnPosY = stopA;                // start at stopA
             }
+            
             if (v->turning) {
                  float turnSpeed = 0.001f;
                  v->turnProgress += delta * turnSpeed*0.75;
@@ -977,14 +1161,14 @@ void updateVehicles(SharedData* sharedData) {
                  float sY = stopA;
                  // Control point (for curvature – adjust offset as needed):
                  float cX = WINDOW_WIDTH/2 + 50.0f;
-                 float cY = stopA + ( (WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20 - stopA) / 2 );
-                 // End point: target position on road B (BL1 incoming lane)
-                 float eX = WINDOW_WIDTH/2;
+                 float targetX = WINDOW_WIDTH/2;
                  float eY = WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20;
+                 float cY = sY + (eY - sY) / 2;
                  float t = v->turnProgress;
                  // Compute Bezier (B(t)= (1-t)^2 * start + 2(1-t)t * control + t^2 * target)
-                 v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*eX;
+                 v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*targetX;
                  v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*eY;
+                 
                  if (v->turnProgress >= 1.0f) {
                       // Finish turn: update lane and reset turning flags.
                       v->lane = 'B';
@@ -997,23 +1181,50 @@ void updateVehicles(SharedData* sharedData) {
                  }
                  continue; // Skip normal forward motion while turning.
             }
+            
+            // L2 vehicles move slower when not turning
+            float l2_speed_multiplier = a_l2_speed_multiplier; // 15% slower
+            float nextPos = v->animPos + speed * delta * l2_speed_multiplier;
+            
+            // Check for vehicle ahead with increased spacing (excluding turning vehicles)
+            if (i > 0) {
+                int prevIdx = (queueA->front + i - 1) % MAX_QUEUE_SIZE;
+                Vehicle *ahead = queueA->vehicles[prevIdx];
+                if (ahead->lane == v->lane && ahead->lane_number == v->lane_number &&
+                    !ahead->turning) {
+                    if (nextPos + VEHICLE_LENGTH + l2_vehicle_gap > ahead->animPos) {
+                        nextPos = ahead->animPos - VEHICLE_LENGTH - l2_vehicle_gap;
+                    }
+                }
+            }
+            
+            if (activeLane == 'A' || v->animPos > WINDOW_HEIGHT/2 || v->animPos > stopA) {
+                v->animPos = nextPos;
+            } else if (v->animPos < stopA) {
+                v->animPos = (nextPos > stopA) ? stopA : nextPos;
+            }
+            continue; // Skip regular movement logic
         }
         
+        // VEHICLE GROUP 3: Lane 1 (leftmost) uses default spacing and speed
         float nextPos = v->animPos + speed * delta;
         
-        // Check for vehicle ahead
+        // Check for vehicle ahead, but only consider vehicles in same lane and not turning
         bool canMove = true;
         if (i > 0) {
             int prevIdx = (queueA->front + i - 1) % MAX_QUEUE_SIZE;
             Vehicle *ahead = queueA->vehicles[prevIdx];
-            if (nextPos + VEHICLE_LENGTH + VEHICLE_GAP > ahead->animPos) {
-                canMove = false;
-                nextPos = ahead->animPos - VEHICLE_LENGTH - VEHICLE_GAP;
+            if (ahead->lane == v->lane && ahead->lane_number == v->lane_number && 
+                !ahead->turning) {
+                if (nextPos + VEHICLE_LENGTH + VEHICLE_GAP > ahead->animPos) {
+                    canMove = false;
+                    nextPos = ahead->animPos - VEHICLE_LENGTH - VEHICLE_GAP;
+                }
             }
         }
 
         if (canMove) {
-            if (activeLane == 'A' || v->animPos > WINDOW_HEIGHT/2) {
+            if (activeLane == 'A' || v->animPos > WINDOW_HEIGHT/2 || v->animPos > stopA) {
                 v->animPos = nextPos;
             } else if (v->animPos < stopA) {
                 v->animPos = (nextPos > stopA) ? stopA : nextPos;
@@ -1022,56 +1233,87 @@ void updateVehicles(SharedData* sharedData) {
             v->animPos = nextPos;
         }
     }
-    while (!isQueueEmpty(queueA) && queueA->vehicles[queueA->front]->animPos > WINDOW_HEIGHT)
+    
+    // Enhanced dequeuing logic - check if any vehicles at front of queueA have moved off screen
+    while (!isQueueEmpty(queueA) && 
+           (queueA->vehicles[queueA->front]->animPos > WINDOW_HEIGHT ||  // Regular movement
+            queueA->vehicles[queueA->front]->animPos < 0)) {             // DL3->AL1 movement
+        
+        Vehicle* v = queueA->vehicles[queueA->front];
+        if (v->animPos < 0) {
+            printf("[DEQUEUE] Vehicle %s reached end of AL1 and has been removed (pos=%.1f)\n", 
+                   v->id, v->animPos);
+        }
         dequeueUnlocked(queueA);
+    }
     pthread_mutex_unlock(&queueA->lock);
-
+    
     // Lane B (south to north)
     pthread_mutex_lock(&queueB->lock);
     for (int i = 0; i < queueB->size; i++) {
         int idx = (queueB->front + i) % MAX_QUEUE_SIZE;
         Vehicle *v = queueB->vehicles[idx];
+
+        float b_l3_vehicle_gap = VEHICLE_GAP * 0.7; // 30% smaller gap for turning lane
+        float b_l2_vehicle_gap = VEHICLE_GAP * 1.5; // 50% larger gap for middle lane
+        float b_l3_speed_multiplier = 1.3;         // 30% faster for turning lane
+        float b_l2_speed_multiplier = 0.5;   
+
+        // Check if this is a vehicle that recently completed a turn from CL3 to BL1
+        if (v->lane == 'B' && v->lane_number == 1 && v->animPos < WINDOW_HEIGHT && v->animPos >= stopB) {
+            // Continue moving it downward (negative direction for B lane)
+            float nextPos = v->animPos - speed * delta * 1.5; // Move slightly faster
+            v->animPos = nextPos;
+            continue;
+        }
         
-        // New turning logic for vehicles from BL3 (rightmost lane)
-        if (v->lane == 'B' && v->lane_number == 3) {
-            // Debug: vehicle moving in BL3
-            printf("Vehicle %s is in BL3, animPos: %f\n", v->id, v->animPos);
-            
-            // Begin turning upon reaching threshold
-            if (!v->turning && v->animPos <= (WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20)) {
-                printf("Vehicle %s reached turning threshold. Starting turn.\n", v->id);
-                v->turning = true;
-                v->turnProgress = 0.0f;
-            }
-            if (v->turning) {
-                float turnDurationFactor = 0.001f; // adjust as needed
-                v->turnProgress += delta * turnDurationFactor;
-                if (v->turnProgress > 1.0f)
-                    v->turnProgress = 1.0f;
-                // Define turning start and target positions:
-                float startX = WINDOW_WIDTH/2 - VEHICLE_LENGTH/1.5;
-                float startY = WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20;
-                // Target for DL1: L1 center on road D = (WINDOW_WIDTH/2 - ROAD_WIDTH/2) - (ROAD_WIDTH/6)
-                float targetX = (WINDOW_WIDTH/2 - ROAD_WIDTH/2) - (ROAD_WIDTH/6);
-                float targetY = WINDOW_HEIGHT/2 + 5; // using vehicle height center (assuming h == 10)
-                printf("Vehicle %s turning: start(%f,%f) -> target(%f,%f), progress: %f\n",
-                       v->id, startX, startY, targetX, targetY, v->turnProgress);
-                float newX = startX + (targetX - startX) * v->turnProgress;
-                float newY = startY + (targetY - startY) * v->turnProgress;
-                printf("Vehicle %s intermediate position: newX = %f, newY = %f\n", v->id, newX, newY);
-                // Update vertical animation position; horizontal position should be used by drawing if modified.
-                v->animPos = newY;
-                if (v->turnProgress >= 1.0f) {
-                    v->lane = 'D';          // Transition to road D
-                    v->lane_number = 1;       // Set as incoming lane DL1
-                    v->turning = false;
-                    v->turnProgress = 0.0f;
-                    v->animPos = targetY;
-                    printf("Vehicle %s completed turn into DL1. Final animPos: %f\n", v->id, v->animPos);
-                }
-                continue; // Skip further vertical movement until turn completes
+        // Improved turning logic for vehicles from BL3 (rightmost lane)
+// Enhanced turning logic for vehicles from BL3 (rightmost lane)
+if (v->lane == 'B' && v->lane_number == 3) {
+    // Only log occasionally to reduce console spam
+    if ((int)v->animPos % 50 == 0) {
+        printf("Vehicle %s is in BL3, animPos: %.1f\n", v->id, v->animPos);
+    }
+    
+    // Begin turning upon reaching threshold
+    if (!v->turning && v->animPos <= (WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20)) {
+        printf("[TURN-START] BL3 Vehicle %s starting rotation to DL1 at pos=%.1f\n", 
+              v->id, v->animPos);
+        v->turning = true;
+        v->turnProgress = 0.0f;
+        v->angle = 0.0f;
+        v->targetAngle = -90.0f; // Counter-clockwise rotation for left turn
+        
+        // Save starting position
+        v->turnPosX = WINDOW_WIDTH/2 - LANE_WIDTH;        // BL3 X position
+        v->turnPosY = WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20; // Current Y position
+    }
+    
+    if (v->turning) {
+        // Use rotation animation instead of Bezier curve
+        rotateVehicle(v, delta);
+        continue; // Skip other movement processing
+    }
+    
+    // Normal movement logic for BL3 vehicles not yet turning
+    float nextPos = v->animPos - speed * delta;
+    
+    // Check for vehicle ahead to prevent collisions
+    if (i > 0) {
+        int prevIdx = (queueB->front + i - 1) % MAX_QUEUE_SIZE;
+        Vehicle *ahead = queueB->vehicles[prevIdx];
+        if (ahead->lane == v->lane && ahead->lane_number == v->lane_number &&
+            !ahead->turning) {
+            if (nextPos - VEHICLE_LENGTH - VEHICLE_GAP < ahead->animPos) {
+                nextPos = ahead->animPos + VEHICLE_LENGTH + VEHICLE_GAP;
             }
         }
+    }
+    
+    v->animPos = nextPos;
+    continue;
+}
+
         
         if (v->lane == 'B' && v->lane_number == 2) {
             if (activeLane != 'B') {
@@ -1081,6 +1323,11 @@ void updateVehicles(SharedData* sharedData) {
                     Vehicle *ahead = queueB->vehicles[prevIdx];
                     if (nextPos - VEHICLE_LENGTH - VEHICLE_GAP < ahead->animPos)
                         nextPos = ahead->animPos + VEHICLE_LENGTH + VEHICLE_GAP;
+                    // if (ahead->lane == v->lane && ahead->lane_number == v->lane_number &&
+                    //     !ahead->turning) {
+                    //     if (nextPos - VEHICLE_LENGTH - b_l2_vehicle_gap < ahead->animPos)
+                    //         nextPos = ahead->animPos + VEHICLE_LENGTH + b_l2_vehicle_gap;
+                    // }
                 }
                 if (nextPos < stopB)
                     v->animPos = stopB;
@@ -1088,7 +1335,7 @@ void updateVehicles(SharedData* sharedData) {
                     v->animPos = nextPos;
                 continue;
             }
-            
+
             // When light is green, begin turning from BL2 to AL1
             if (!v->turning && v->animPos <= stopB) {
                 printf("BL2 Vehicle %s reached threshold. Starting turn to AL1.\n", v->id);
@@ -1131,14 +1378,28 @@ void updateVehicles(SharedData* sharedData) {
         if (i > 0) {
             int prevIdx = (queueB->front + i - 1) % MAX_QUEUE_SIZE;
             Vehicle *ahead = queueB->vehicles[prevIdx];
-            if (nextPos - VEHICLE_LENGTH - VEHICLE_GAP < ahead->animPos) {
-                canMove = false;
+            
+            // Modified collision detection for BL3
+            bool shouldCheck = false;
+            if (v->lane_number == 3) {
+                // Check for any vehicle in lane B that could block our path
+                shouldCheck = (ahead->lane == 'B' && 
+                              (ahead->lane_number == 2 || ahead->lane_number == 3) &&
+                              !ahead->turning);
+            } else {
+                // Original same-lane check for other vehicles
+                shouldCheck = (ahead->lane == v->lane && 
+                              ahead->lane_number == v->lane_number &&
+                              !ahead->turning);
+            }
+            
+            if (shouldCheck && nextPos - VEHICLE_LENGTH - VEHICLE_GAP < ahead->animPos) {
                 nextPos = ahead->animPos + VEHICLE_LENGTH + VEHICLE_GAP;
             }
         }
 
         if (canMove) {
-            if (activeLane == 'B' || v->animPos < WINDOW_HEIGHT/2) {
+            if (activeLane == 'B' || v->animPos < WINDOW_HEIGHT/2 || v->animPos > stopB) {
                 v->animPos = nextPos;
             } else if (v->animPos > stopB) {
                 v->animPos = (nextPos < stopB) ? stopB : nextPos;
@@ -1157,45 +1418,60 @@ void updateVehicles(SharedData* sharedData) {
         int idx = (queueC->front + i) % MAX_QUEUE_SIZE;
         Vehicle *v = queueC->vehicles[idx];
         
+        // Check if this is a vehicle that recently completed a turn
+        if (v->lane == 'C' && v->lane_number == 1 && v->animPos > 0 && v->animPos >= stopC) {
+            // This is likely a vehicle that came from a turn
+            float nextPos = v->animPos - speed * delta * 1.5; // Move slightly faster
+            v->animPos = nextPos;
+            
+            // Optional debugging
+            if ((int)v->animPos % 50 == 0) {
+                printf("[POST-TURN] Vehicle %s moving along CL1 at pos %.1f\n", v->id, v->animPos);
+            }
+            continue;
+        }
+
         // For vehicles from road C (CL3) turning into BL1:
         if (v->lane == 'C' && v->lane_number == 3) {
+             // L3 vehicles use reduced spacing
+            float l3_vehicle_gap = VEHICLE_GAP * 0.7; // 30% smaller gap
+
+            // Check for vehicle ahead with reduced spacing
+            if (i > 0) {
+                int prevIdx = (queueC->front + i - 1) % MAX_QUEUE_SIZE;
+                Vehicle *ahead = queueC->vehicles[prevIdx];
+                if (ahead->lane == v->lane && ahead->lane_number == v->lane_number &&
+                    !ahead->turning) {
+                    if (v->animPos - l3_vehicle_gap - VEHICLE_LENGTH < ahead->animPos) {
+                        v->animPos = ahead->animPos + VEHICLE_LENGTH + l3_vehicle_gap;
+                    }
+                }
+            }
+    
             if (!v->turning && v->animPos <= stopC) {
-                printf("CL3 Vehicle %s starting turn to BL1\n", v->id);
+                printf("[TURN-START] CL3 Vehicle %s starting rotation to AL1 at pos=%.1f\n", 
+                       v->id, v->animPos);
                 v->turning = true;
                 v->turnProgress = 0.0f;
+                v->angle = 0.0f;
+                v->targetAngle = 90.0f; // Clockwise rotation for right turn
+                
+                // Save starting position
                 v->turnPosX = stopC;
-                v->turnPosY = WINDOW_HEIGHT/2 + LANE_WIDTH;
+                v->turnPosY = WINDOW_HEIGHT/2 - LANE_WIDTH; // CL3 Y position
             }
 
             if (v->turning) {
-                float turnSpeed = 0.001f;
-                v->turnProgress += delta * turnSpeed * 0.75;
-                if (v->turnProgress > 1.0f)
-                    v->turnProgress = 1.0f;
-                
-                float t = easeInOutQuad(v->turnProgress);
-                float sX = stopC;
-                float sY = WINDOW_HEIGHT/2 + LANE_WIDTH;
-                float eX = WINDOW_WIDTH/2;
-                float eY = WINDOW_HEIGHT;
-                
-                // Adjust control points for smoother curve
-                float cX = sX - 100.0f;
-                float cY = sY + 100.0f;
-                
-                v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*eX;
-                v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*eY;
-                
-                if (v->turnProgress >= 1.0f) {
-                    v->lane = 'B';
-                    v->lane_number = 1;
-                    v->turning = false;
-                    v->turnProgress = 0.0f;
-                    v->animPos = WINDOW_HEIGHT;
-                    printf("CL3 Vehicle %s completed turn into BL1\n", v->id);
-                }
-                continue;
+                // Use rotation animation instead of Bezier curve
+                rotateVehicle(v, delta);
+                continue; // Skip other movement processing
             }
+            
+            // L3 vehicles move faster when not turning
+            float l3_speed_multiplier = 1.3;
+            float nextPos = v->animPos - speed * delta * l3_speed_multiplier;
+            v->animPos = nextPos;
+            continue;
         }
         
         if (v->lane == 'C' && v->lane_number == 2) {
@@ -1262,7 +1538,7 @@ void updateVehicles(SharedData* sharedData) {
         }
 
         if (canMove) {
-            if (activeLane == 'C' || v->animPos < WINDOW_WIDTH/2) {
+            if (activeLane == 'C' || v->animPos < WINDOW_WIDTH/2 || v->animPos > stopC) {
                 v->animPos = nextPos;
             } else if (v->animPos > stopC) {
                 v->animPos = (nextPos < stopC) ? stopC : nextPos;
@@ -1282,6 +1558,7 @@ void updateVehicles(SharedData* sharedData) {
         Vehicle *v = queueD->vehicles[idx];
         
         // For vehicles from road D (DL3) turning into AL1:
+            // For vehicles from road D (DL3) turning into AL1:
         if (v->lane == 'D' && v->lane_number == 3) {
             if (!v->turning && v->animPos >= stopD) {
                 printf("DL3 Vehicle %s starting turn to AL1\n", v->id);
@@ -1297,25 +1574,31 @@ void updateVehicles(SharedData* sharedData) {
                 if (v->turnProgress > 1.0f)
                     v->turnProgress = 1.0f;
                 
-                float t = easeInOutQuad(v->turnProgress);
+                // Use t directly instead of easeInOutQuad for consistency
+                float t = v->turnProgress;
                 float sX = stopD;
                 float sY = WINDOW_HEIGHT/2 - LANE_WIDTH;
-                float eX = WINDOW_WIDTH/2;
-                float eY = 0;
+                float eX = WINDOW_WIDTH/2 - LANE_WIDTH/2;
+                float eY = 20; // Adjusted to prevent overshooting
                 
-                // Adjust control points for smoother curve
-                float cX = (sX + eX) / 2;
-                float cY = sY - 100.0f;
+                // Adjust control points for smoother curve - using 50.0f offset
+                float cX = sX + 50.0f;
+                float cY = sY - 50.0f;
                 
                 v->turnPosX = (1-t)*(1-t)*sX + 2*(1-t)*t*cX + t*t*eX;
                 v->turnPosY = (1-t)*(1-t)*sY + 2*(1-t)*t*cY + t*t*eY;
                 
+                // Debug log for tracking position during turn
+                if (t == 0.0f || t == 0.5f || t == 1.0f) {
+                    printf("DL3 Vehicle %s turn progress: %.2f, pos: (%.1f, %.1f)\n", 
+                           v->id, t, v->turnPosX, v->turnPosY);
+                }
                 if (v->turnProgress >= 1.0f) {
                     v->lane = 'A';
                     v->lane_number = 1;
                     v->turning = false;
                     v->turnProgress = 0.0f;
-                    v->animPos = 0;
+                    v->animPos = stopA - 50;
                     printf("DL3 Vehicle %s completed turn into AL1\n", v->id);
                 }
                 continue;
@@ -1386,7 +1669,7 @@ void updateVehicles(SharedData* sharedData) {
         }
 
         if (canMove) {
-            if (activeLane == 'D' || v->animPos > WINDOW_WIDTH/2) {
+            if (activeLane == 'D' || v->animPos > WINDOW_WIDTH/2 || v->animPos > stopD) {
                 v->animPos = nextPos;
             } else if (v->animPos < stopD) {
                 v->animPos = (nextPos > stopD) ? stopD : nextPos;
@@ -1407,20 +1690,10 @@ void* processVehiclesSequentially(void* arg) {
         perror("Error opening file");
         return NULL;
     }
-    char **lines = NULL;
-    size_t count = 0;
     char buffer[MAX_LINE_LENGTH];
     while (fgets(buffer, sizeof(buffer), file)) {
         buffer[strcspn(buffer, "\n")] = 0;
-        lines = realloc(lines, sizeof(char*) * (count + 1));
-        lines[count] = strdup(buffer);
-        count++;
-    }
-    fclose(file);
-
-    for (size_t i = 0; i < count; i++) {
-        char* line = lines[i];
-        char* vehicleNumber = strtok(line, ":");
+        char* vehicleNumber = strtok(buffer, ":");
         char* road = strtok(NULL, ":");
         if (vehicleNumber && road) {
             Vehicle* newVehicle = (Vehicle*)malloc(sizeof(Vehicle));
@@ -1442,7 +1715,7 @@ void* processVehiclesSequentially(void* arg) {
             else if (road[0] == 'B')
                 newVehicle->animPos = (float)WINDOW_HEIGHT;
             else if (road[0] == 'C')
-                newVehicle->animPos = (float)WINDOW_WIDTH;
+                newVehicle->animPos = (float)WINDOW_WIDTH - 10.0f; // Start slightly in view
             else if (road[0] == 'D')
                 newVehicle->animPos = 0.0f;
             switch(newVehicle->lane) {
@@ -1455,9 +1728,182 @@ void* processVehiclesSequentially(void* arg) {
         }
         sleep(1); // Reduced from 3 to 1 second for more frequent spawns
     }
-    for (size_t i = 0; i < count; i++) {
-        free(lines[i]);
-    }
-    free(lines);
+    fclose(file);
     return NULL;
 }
+
+void rotateVehicle(Vehicle* vehicle, Uint32 delta) {
+    if (!vehicle->turning) return;
+    
+    // Define rotation speed (degrees per millisecond)
+    float rotationSpeed = 0.1f;
+    // Position during turn - CL3 to BL1
+    const int stopA = WINDOW_HEIGHT/2 - ROAD_WIDTH/2 - 20;
+    const int stopB = WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20;
+    const int stopC = WINDOW_WIDTH/2 + ROAD_WIDTH/2 + 20;
+    const int stopD = WINDOW_WIDTH/2 - ROAD_WIDTH/2 - 20;
+    
+    // Update progress for tracking
+    vehicle->turnProgress += delta * 0.001f; // Convert to seconds for easier debugging
+    if (vehicle->turnProgress > 1.0f) vehicle->turnProgress = 1.0f;
+    
+    // Calculate current angle and position based on vehicle lane and progress
+    float t = easeInOutQuad(vehicle->turnProgress);
+    
+    if (vehicle->lane == 'B' && vehicle->lane_number == 3) {
+        // BL3 vehicles turning left to DL1 (counter-clockwise rotation)
+        float startAngle = 0.0f;      // Initial angle (0 = straight down)
+        float endAngle = -90.0f;      // Final angle (-90 = facing left)
+        
+        vehicle->angle = startAngle + (endAngle - startAngle) * t;
+        
+        // Position during turn
+        float startX = WINDOW_WIDTH/2 - LANE_WIDTH;
+        float startY = WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20;
+        float endX = WINDOW_WIDTH/2 - ROAD_WIDTH/2 - 20;
+        float endY = WINDOW_HEIGHT/2 + LANE_WIDTH;
+        
+        vehicle->turnPosX = startX + (endX - startX) * t;
+        vehicle->turnPosY = startY + (endY - startY) * t;
+        
+        // Check if rotation is complete
+        if (vehicle->turnProgress >= 1.0f) {
+            // Update vehicle properties for new lane
+            vehicle->lane = 'D';
+            vehicle->lane_number = 1;
+            vehicle->turning = false;
+            vehicle->turnProgress = 0.0f;
+            vehicle->angle = 0.0f;
+            // Position in new lane
+            vehicle->animPos = endX;
+            printf("BL3 Vehicle %s completed turn into DL1\n", vehicle->id);
+        }
+    }
+    else if (vehicle->lane == 'C' && vehicle->lane_number == 3) {
+        // CL3 vehicles turning right to BL1 (clockwise rotation)
+        float startAngle = 0.0f;      // Initial angle (0 = straight left)
+        float endAngle = 90.0f;       // Final angle (90 = facing down)
+        vehicle->angle = startAngle + (endAngle - startAngle) * t;
+        
+        // Position during turn - CL3 to BL1
+        float startX = stopC;
+        float startY = WINDOW_HEIGHT/2 - LANE_WIDTH;
+        float endX = WINDOW_WIDTH/2;
+        float endY = stopB - 30; // Position just above stopB
+        
+        // Log the turn progress
+        if ((int)(vehicle->turnProgress * 100) % 30 == 0 && 
+            (int)(vehicle->turnProgress * 100) / 30 != (int)((vehicle->turnProgress - delta * 0.001f) * 100) / 30) {
+            printf("[CL3→BL1] Progress: %.1f%%, Angle: %.1f, Pos: (%.1f, %.1f)\n",
+                   vehicle->turnProgress * 100, vehicle->angle, 
+                   startX + (endX - startX) * t, startY + (endY - startY) * t);
+        }
+        
+        // Use quadratic bezier curve for smoother movement
+        float controlX = startX - 30.0f;
+        float controlY = endY - 30.0f;
+        
+        vehicle->turnPosX = (1-t)*(1-t)*startX + 2*(1-t)*t*controlX + t*t*endX;
+        vehicle->turnPosY = (1-t)*(1-t)*startY + 2*(1-t)*t*controlY + t*t*endY;
+        
+        // Check if rotation is complete
+        if (vehicle->turnProgress >= 1.0f) {
+            // FIX: Set lane to 'B' (not 'A') and lane_number to 1
+            vehicle->lane = 'B';
+            vehicle->lane_number = 1;
+            vehicle->turning = false;
+            vehicle->turnProgress = 0.0f;
+            vehicle->angle = 0.0f;
+            // FIX: Set animPos correctly for B lane (vertical position)
+            vehicle->animPos = endY;
+            printf("CL3 Vehicle %s completed turn into BL1\n", vehicle->id);
+        }
+    }
+    else if (vehicle->lane == 'D' && vehicle->lane_number == 3) {
+        // DL3 vehicles turning right to AL1
+        float startAngle = 0.0f;      // Initial angle (0 = straight right)
+        float endAngle = -90.0f;      // Final angle (-90 = facing up)
+        vehicle->angle = startAngle + (endAngle - startAngle) * t;
+        
+        // Position during turn - DL3 to AL1
+        float startX = stopD;
+        float startY = WINDOW_HEIGHT/2 - LANE_WIDTH;
+        float endX = WINDOW_WIDTH/2 - LANE_WIDTH/2;
+        float endY = stopA;
+        
+        // Use quadratic interpolation for smoother curve
+        float controlX = startX + 40.0f;
+        float controlY = endY + 40.0f;
+        
+        vehicle->turnPosX = (1-t)*(1-t)*startX + 2*(1-t)*t*controlX + t*t*endX;
+        vehicle->turnPosY = (1-t)*(1-t)*startY + 2*(1-t)*t*controlY + t*t*endY;
+        
+        // Check if rotation is complete
+        if (vehicle->turnProgress >= 1.0f) {
+            // Update vehicle properties for new lane
+            vehicle->lane = 'A';
+            vehicle->lane_number = 1;
+            vehicle->turning = false;
+            vehicle->turnProgress = 0.0f;
+            vehicle->angle = 0.0f;
+            // Position in new lane - set to stopA - 50 to prevent teleporting
+            vehicle->animPos = stopA - 50;
+            printf("DL3 Vehicle %s completed turn into AL1\n", vehicle->id);
+        }
+    }
+}
+
+// void rotateVehicle(Vehicle* vehicle, Uint32 delta) {
+//     if (!vehicle->turning) return;
+    
+//     // Define rotation speed (degrees per millisecond)
+//     float rotationSpeed = 0.1f;
+    
+//     // Calculate amount to rotate this frame
+//     float rotationAmount = rotationSpeed * delta;
+    
+//     // Update progress for tracking
+//     vehicle->turnProgress += delta * 0.001f; // Convert to seconds for easier debugging
+//     if (vehicle->turnProgress > 1.0f) vehicle->turnProgress = 1.0f;
+    
+//     // Calculate current angle based on progress
+//     if (vehicle->lane == 'B' && vehicle->lane_number == 3) {
+//         // For BL3 vehicles turning left, we rotate counter-clockwise (negative rotation)
+//         float startAngle = 0.0f;      // Initial angle (0 = straight down)
+//         float endAngle = -90.0f;      // Final angle (-90 = facing left)
+        
+//         // Calculate this frame's angle using progress-based interpolation
+//         // Using easeInOutQuad for smoother start/stop
+//         float t = easeInOutQuad(vehicle->turnProgress);
+//         vehicle->angle = startAngle + (endAngle - startAngle) * t;
+        
+//         // Also update position during turn (simplified linear movement)
+//         // Start and end positions
+//         float startX = WINDOW_WIDTH/2 - LANE_WIDTH;
+//         float startY = WINDOW_HEIGHT/2 + ROAD_WIDTH/2 + 20;
+//         float endX = WINDOW_WIDTH/2 - ROAD_WIDTH/2 - 20;
+//         float endY = WINDOW_HEIGHT/2 + LANE_WIDTH;
+        
+//         // Simple linear interpolation for position during rotation
+//         vehicle->turnPosX = startX + (endX - startX) * t;
+//         vehicle->turnPosY = startY + (endY - startY) * t;
+        
+//         // Debug output
+//         if ((int)(vehicle->turnProgress * 10) % 2 == 0 && 
+//             (int)(vehicle->turnProgress * 10) != (int)((vehicle->turnProgress - delta * 0.001f) * 10)) {
+//             printf("[ROTATION] %s: progress=%.2f, angle=%.1f, pos=(%.1f, %.1f)\n", 
+//                   vehicle->id, vehicle->turnProgress, vehicle->angle, 
+//                   vehicle->turnPosX, vehicle->turnPosY);
+//         }
+        
+//         // Check if rotation is complete
+//         if (vehicle->turnProgress >= 1.0f) {
+//             vehicle->turning = false;
+//             vehicle->lane = 'D';
+//             vehicle->lane_number = 1;
+//             vehicle->animPos = endX; // Set to the proper position in DL1
+//             printf("[ROTATION-COMPLETE] %s: Completed turn to DL1. Final angle=%.1f\n", 
+//                   vehicle->id, vehicle->angle);
+//         }
+//     }
+// }

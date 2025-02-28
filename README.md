@@ -6,10 +6,10 @@ A sophisticated traffic management system that simulates real-world junction beh
 ![[Traffic Simulator Demo](path_to_your_demo.gif)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/dsa-gif.gif)
 
 
-![[Traffic generator run](path_to_your_demo.gif)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/traffic-generator-2.mp4)
+![alt text](traffic-generator-2-ezgif.com-video-to-gif-converter-1.gif)
 
 
-![[Traffic simulator run](path_to_your_demo.gif)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/simulator-run-2.mp4)
+![[Traffic simulator run](path_to_your_demo.gif)](https://github.com/SwohamKayastha/dsa-queue-simulator/blob/main/simulator-run-2-ezgif.com-video-to-gif-converter.gif)
 
 ## ✨ Key Features
 
